@@ -94,6 +94,19 @@ describe("handleGitHubWebhook", () => {
     expect(row.desiredSha).toBe("a".repeat(40));
   });
 
+  it("a delivery that fails to enqueue stays redeliverable", async () => {
+    const { repo, deps } = await setup();
+    const body = push("refs/heads/main");
+    const delivery = crypto.randomUUID();
+    const failing = { ...deps, enqueueSync: async () => Promise.reject(new Error("queue down")) };
+
+    await expect(handleGitHubWebhook(failing, body, headers(body, delivery))).rejects.toThrow("queue down");
+    expect(await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.deliveryId, delivery))).toHaveLength(0);
+
+    expect(await handleGitHubWebhook(deps, body, headers(body, delivery))).toMatchObject({ status: 202, body: "queued" });
+    expect((await db.select().from(repos).where(eq(repos.id, repo.id)))[0].desiredSha).toBe(AFTER);
+  });
+
   it("acks non-push events without acting", async () => {
     const { deps, enqueued } = await setup();
     const body = JSON.stringify({ zen: "hi" });

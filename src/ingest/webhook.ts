@@ -45,6 +45,17 @@ export async function handleGitHubWebhook(deps: WebhookDeps, rawBody: string, he
     .onConflictDoNothing()
     .returning({ id: webhookDeliveries.deliveryId });
   if (!inserted.length) return { status: 200, body: "duplicate" };
+
+  // A delivery we failed to act on must stay redeliverable, so forget it before reporting the error.
+  try {
+    return await processDelivery(deps, event, rawBody);
+  } catch (err) {
+    await deps.db.delete(webhookDeliveries).where(eq(webhookDeliveries.deliveryId, delivery.slice(0, 200)));
+    throw err;
+  }
+}
+
+async function processDelivery(deps: WebhookDeps, event: string, rawBody: string): Promise<WebhookResponse> {
   if (event !== "push") return { status: 202, body: "ignored" };
 
   let payload: z.infer<typeof pushSchema>;
