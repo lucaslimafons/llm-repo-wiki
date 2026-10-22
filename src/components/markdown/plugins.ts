@@ -1,5 +1,6 @@
 import { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
 import { githubBlobUrl, parseSourceHref, parseWikiHref } from "@/lib/source-links";
+import { wikiRoute } from "@/wiki/routes";
 
 /** The slice of hast these plugins touch; avoids depending on @types/hast directly. */
 export type HNode = {
@@ -13,9 +14,6 @@ export type HNode = {
 /** id → display path. Omitted (chat), a wiki link goes through /page/<id>, which redirects. */
 export type WikiPaths = Record<string, string>;
 
-export function wikiRoute(path: string): string {
-  return `/wiki/${path.split("/").map(encodeURIComponent).join("/")}`;
-}
 
 /** Only http(s), relative and #fragment hrefs survive: sanitize drops every other scheme. */
 export const sanitizeSchema: SanitizeSchema = {
