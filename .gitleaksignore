@@ -1,0 +1,2 @@
+# Fake fixtures in the secret scanner tests (AWS documentation example keys), kept so the scanner is tested.
+48b5634138f2695f569bc36e9bf2d13a3ea0c1b9:src/ingest/secrets.test.ts:generic-api-key:10

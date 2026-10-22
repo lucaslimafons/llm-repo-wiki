@@ -7,7 +7,7 @@ const j = (...parts: string[]) => parts.join("");
 
 const positives: [string, string][] = [
   ["aws-access-key-id", j("const id = 'AKIA", "IOSFODNN7EXAMPLE';")],
-  ["aws-secret-access-key", j("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY")],
+  ["aws-secret-access-key", j("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY")], // gitleaks:allow (AWS docs example key)
   ["github-token", j("token: gh", "p_", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8")],
   ["github-fine-grained-pat", j("github", "_pat_", "11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123")],
   ["openai-api-key", j("OPENAI=sk-proj-", "abcdefghij1234567890", "T3BlbkFJ", "abcdefghij1234567890")],
