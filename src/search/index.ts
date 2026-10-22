@@ -14,6 +14,9 @@ export const CANDIDATES = 50;
 
 export type SearchMode = "hybrid" | "vector" | "fts";
 export type SearchDeps = { db: Db; embedder: Embedder };
+/** RRF weight per list. 1:1 is plain RRF; the eval measures others (docs/eval). */
+export type FusionWeights = { vector: number; fts: number };
+const EQUAL_WEIGHTS: FusionWeights = { vector: 1, fts: 1 };
 
 // Inputs can come straight from the model's tool call, so validate even typed callers.
 const inputSchema = z.object({
@@ -38,7 +41,12 @@ export async function searchKnowledge(input: SearchInput, deps: SearchDeps = def
 }
 
 /** `mode` exists for the eval (vector-only / full-text-only baselines). */
-export async function searchWithMode(input: SearchInput, mode: SearchMode, deps: SearchDeps): Promise<SearchHit[]> {
+export async function searchWithMode(
+  input: SearchInput,
+  mode: SearchMode,
+  deps: SearchDeps,
+  weights: FusionWeights = EQUAL_WEIGHTS,
+): Promise<SearchHit[]> {
   const { query, scope, repo, limit } = inputSchema.parse(input);
   const { db, embedder } = deps;
 
@@ -57,7 +65,7 @@ export async function searchWithMode(input: SearchInput, mode: SearchMode, deps:
     // Without the iterative scan, a selective filter can leave HNSW with too few rows.
     await tx.execute(sql`set local hnsw.iterative_scan = relaxed_order`);
     return tx.execute<{ kind: "source" | "wiki"; id: string; score: number }>(
-      fusedQuery({ query, vector, model: embedder.model, scope, repoId, limit, mode }),
+      fusedQuery({ query, vector, model: embedder.model, scope, repoId, limit, mode, weights }),
     );
   });
   return hydrate(db, ranked.map((r) => ({ ...r, score: Number(r.score) })));
@@ -71,6 +79,7 @@ type QueryParts = {
   repoId: string | null;
   limit: number;
   mode: SearchMode;
+  weights: FusionWeights;
 };
 
 function fusedQuery(p: QueryParts): SQL {
@@ -117,7 +126,7 @@ function fusedQuery(p: QueryParts): SQL {
     )
     select coalesce(vec.kind, fts.kind) as kind,
            coalesce(vec.id, fts.id) as id,
-           coalesce(1.0 / (${RRF_K} + vec.r), 0) + coalesce(1.0 / (${RRF_K} + fts.r), 0) as score
+           coalesce(${p.weights.vector}::float8 / (${RRF_K} + vec.r), 0) + coalesce(${p.weights.fts}::float8 / (${RRF_K} + fts.r), 0) as score
     from vec full outer join fts on vec.kind = fts.kind and vec.id = fts.id
     order by score desc, coalesce(vec.r, ${CANDIDATES + 1}), coalesce(fts.r, ${CANDIDATES + 1})
     limit ${p.limit}`;

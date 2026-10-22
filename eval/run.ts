@@ -1,6 +1,6 @@
 /**
- * Retrieval eval: recall@5 and MRR@10 for vector-only, full-text-only and hybrid over a pinned
- * commit of a public repo. Syncs that commit first (real embeddings, so it needs
+ * Retrieval eval: recall@5, MRR@10, latency and cost per retrieval strategy (vector, full-text,
+ * RRF hybrid, weighted RRF, and each with a cross-encoder reranker) over a pinned commit of a public repo. Syncs that commit first (real embeddings, so it needs
  * OPENROUTER_API_KEY). Run: pnpm eval
  */
 import { readFile } from "node:fs/promises";
@@ -14,7 +14,9 @@ import { createDefaultChunker } from "@/ingest/chunk";
 import { createOpenRouterEmbedder } from "@/ingest/embedder";
 import { syncRepo } from "@/ingest/sync";
 import { env, openRouterKey } from "@/lib/env";
-import { searchWithMode, type SearchMode } from "@/search";
+import type { SearchHit } from "@/core/contracts";
+import { searchWithMode, type FusionWeights, type SearchMode } from "@/search";
+import { rerankHits } from "@/search/rerank";
 
 const goldenSchema = z.object({
   repo: z.string(),
@@ -24,6 +26,21 @@ const goldenSchema = z.object({
 
 const K_RECALL = 5;
 const K_MRR = 10;
+/** Candidates handed to the reranker. */
+const RERANK_POOL = 30;
+
+type Strategy = { name: string; mode: SearchMode; weights?: FusionWeights; rerank?: string };
+
+const STRATEGIES: Strategy[] = [
+  { name: "vector", mode: "vector" },
+  { name: "fts", mode: "fts" },
+  { name: "hybrid 1:1", mode: "hybrid" },
+  { name: "hybrid 2:1", mode: "hybrid", weights: { vector: 2, fts: 1 } },
+  { name: "hybrid 3:1", mode: "hybrid", weights: { vector: 3, fts: 1 } },
+  { name: "vector + rerank-4-fast", mode: "vector", rerank: "cohere/rerank-4-fast" },
+  { name: "hybrid + rerank-4-fast", mode: "hybrid", rerank: "cohere/rerank-4-fast" },
+  { name: "hybrid + rerank-4-pro", mode: "hybrid", rerank: "cohere/rerank-4-pro" },
+];
 
 async function main() {
   const golden = goldenSchema.parse(JSON.parse(await readFile(new URL("./golden.json", import.meta.url), "utf8")));
@@ -52,23 +69,43 @@ async function main() {
     );
   }
 
-  const modes: SearchMode[] = ["vector", "fts", "hybrid"];
-  const rows: { mode: SearchMode; recall: number; mrr: number }[] = [];
-  for (const mode of modes) {
+  const only = process.argv[2];
+  const rows: { name: string; recall: number; mrr: number; ms: number; cost: number; misses: string[] }[] = [];
+  for (const st of STRATEGIES.filter((x) => !only || x.name.includes(only))) {
     let found = 0;
     let rr = 0;
+    let ms = 0;
+    let cost = 0;
+    const misses: string[] = [];
     for (const { q, expected } of golden.questions) {
-      const hits = await searchWithMode({ query: q, scope: "source", repo: golden.repo, limit: K_MRR }, mode, { db: database, embedder });
-      const rank = hits.findIndex((h) => h.kind === "source" && expected.includes(h.path));
+      const t0 = performance.now();
+      let hits: SearchHit[] = await searchWithMode(
+        { query: q, scope: "source", repo: golden.repo, limit: st.rerank ? RERANK_POOL : K_MRR },
+        st.mode,
+        { db: database, embedder },
+        st.weights,
+      );
+      if (st.rerank) {
+        const out = await rerankHits(hits, q, { apiKey: openRouterKey(), model: st.rerank, topN: K_MRR });
+        hits = out.hits;
+        cost += out.costUsd;
+      }
+      ms += performance.now() - t0;
+      const rank = hits.slice(0, K_MRR).findIndex((h) => h.kind === "source" && expected.includes(h.path));
       if (rank >= 0 && rank < K_RECALL) found++;
+      else misses.push(q);
       if (rank >= 0) rr += 1 / (rank + 1);
     }
-    rows.push({ mode, recall: found / golden.questions.length, mrr: rr / golden.questions.length });
+    const n = golden.questions.length;
+    rows.push({ name: st.name, recall: found / n, mrr: rr / n, ms: ms / n, cost, misses });
   }
 
   console.log(`\n${golden.repo}@${golden.sha.slice(0, 7)} · ${golden.questions.length} questions · ${embedder.model}\n`);
-  console.log(`mode     recall@${K_RECALL}  MRR@${K_MRR}`);
-  for (const r of rows) console.log(`${r.mode.padEnd(8)} ${r.recall.toFixed(3).padStart(8)}  ${r.mrr.toFixed(3).padStart(6)}`);
+  console.log(`${"strategy".padEnd(24)} recall@${K_RECALL}  MRR@${K_MRR}  ms/query  rerank $`);
+  for (const r of rows) {
+    console.log(`${r.name.padEnd(24)} ${r.recall.toFixed(3).padStart(8)}  ${r.mrr.toFixed(3).padStart(6)}  ${r.ms.toFixed(0).padStart(8)}  ${r.cost.toFixed(4).padStart(8)}`);
+  }
+  if (process.env.EVAL_JSON) console.log(`JSON ${JSON.stringify(rows)}`);
   await database.$client.end();
 }
 

@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SearchHit } from "@/core/contracts";
@@ -220,6 +221,41 @@ describe("author-wiki: grounding", () => {
   it("fails loudly on an empty outline instead of succeeding with no pages", async () => {
     const { d } = deps(authorModel([], goodDraft));
     await expect(runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] })).rejects.toThrow("outline came back empty");
+  });
+});
+
+describe("author-wiki: resilience", () => {
+  it("drops a page whose draft the model fumbles and keeps writing the rest", async () => {
+    const flaky = (title: string) => (title === "Architecture" ? { bodyMd: 42 as unknown as string, citations: [] } : goodDraft(title));
+    const { d } = deps(authorModel(["Overview", "Architecture", "Glossary"], flaky));
+    const result = await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+    expect(result.proposed).toEqual(["Overview", "Glossary"]);
+    expect(result.dropped).toHaveLength(1);
+    expect(result.dropped[0]).toMatchObject({ path: "Architecture" });
+    expect(result.dropped[0].reason).toMatch(/^the model failed to write it/);
+  });
+
+  it("stops at the first credit or auth error instead of burning through every page", async () => {
+    const outOfCredits = new APICallError({ message: "Insufficient credits", url: "u", requestBodyValues: {}, statusCode: 402 });
+    let drafts = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async ({ prompt }) => {
+        const base = { finishReason: { unified: "stop" as const, raw: undefined }, usage: usage(10, 10), warnings: [] };
+        if (JSON.stringify(prompt).includes("OUTLINE")) {
+          return { ...base, content: [{ type: "text" as const, text: JSON.stringify({ pages: ["A", "B", "C"].map((path) => ({ path, purpose: path, queries: [] })) }) }] };
+        }
+        drafts++;
+        throw outOfCredits;
+      },
+    });
+    await expect(runAuthorJob(deps(model).d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] })).rejects.toThrow("Insufficient credits");
+    expect(drafts).toBe(1);
+  });
+
+  it("fails the run when every draft fails, so pg-boss retries it", async () => {
+    const broken = () => ({ bodyMd: 42 as unknown as string, citations: [] });
+    const { d } = deps(authorModel(["Overview", "Glossary"], broken));
+    await expect(runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] })).rejects.toThrow("every page draft failed (2)");
   });
 });
 
