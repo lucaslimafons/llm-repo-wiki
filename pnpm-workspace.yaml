@@ -1,0 +1,12 @@
+onlyBuiltDependencies:
+  - esbuild
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+  # code-chunk parses through web-tree-sitter (WASM); the native bindings are never loaded.
+  - tree-sitter-go
+  - tree-sitter-java
+  - tree-sitter-javascript
+  - tree-sitter-python
+  - tree-sitter-rust
+  - tree-sitter-typescript
