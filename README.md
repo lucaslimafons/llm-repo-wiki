@@ -17,6 +17,24 @@ This is a study project for learning retrieval-augmented generation (RAG) end to
 locally with `docker compose` and `pnpm`, and is not meant to be deployed: there is no auth by
 design.
 
+## Stack
+
+| Layer | Tech |
+|---|---|
+| App | Next.js 16 (App Router), React 19, TanStack Query, Tailwind 4 |
+| LLMs | Vercel AI SDK 7 (`ToolLoopAgent`, tool approvals), OpenRouter |
+| Data | Postgres 18 + pgvector 0.8 (HNSW + full-text), Drizzle ORM |
+| Retrieval | tree-sitter chunking ([`code-chunk`](https://github.com/supermemoryai/code-chunk)), hybrid RRF, optional Cohere rerank |
+| Jobs | pg-boss: queue, retries and schedules in the same Postgres |
+| Quality | zod 4 at every boundary, Vitest against real Postgres, gitleaks in CI |
+
+Notable choices:
+
+- **No Redis.** The job queue lives in the same Postgres.
+- **No agent framework.** The RAG pipeline is written in plain code, on purpose, so every step is
+  visible.
+- **No `useEffect`.** A lint rule enforces it.
+
 ## What it does
 
 - **Ingests GitHub repos.** It downloads a tarball pinned to a commit, filters out binaries, lockfiles
@@ -77,6 +95,17 @@ pnpm repo:add pmndrs/zustand      # or use the "Add repository" box in the sideb
 The first sync takes a few seconds; the first wiki, about 10 minutes and about $0.10. Review the
 pages under **Proposals**.
 
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `pnpm setup` | Start Postgres in Docker and run migrations |
+| `pnpm dev` / `pnpm worker` | Web app / background job worker |
+| `pnpm repo:add owner/name` | Add a repo and queue its first sync |
+| `pnpm export --out <dir>` | Write the wiki as an Azure DevOps folder |
+| `pnpm eval`, `pnpm bench:*` | Retrieval eval and model benchmarks |
+| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 250 tests against a real Postgres, plus checks |
+
 ## Results
 
 The defaults come from measured runs, not guesses. They were evaluated live on
@@ -115,29 +144,6 @@ The agent reads code from repositories you don't control and can write to the wi
 - **Nothing is exposed.** Docker ports bind to `127.0.0.1`, and the GitHub webhook checks
   `X-Hub-Signature-256` with a timing-safe compare.
 - **Every boundary is validated with zod:** env, tool inputs, GitHub responses, and API responses.
-
-## Scripts
-
-| Command | What it does |
-|---|---|
-| `pnpm setup` | Start Postgres in Docker and run migrations |
-| `pnpm dev` / `pnpm worker` | Web app / background job worker |
-| `pnpm repo:add owner/name` | Add a repo and queue its first sync |
-| `pnpm export --out <dir>` | Write the wiki as an Azure DevOps folder |
-| `pnpm eval`, `pnpm bench:*` | Retrieval eval and model benchmarks |
-| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 244 tests against a real Postgres, plus checks |
-
-## Stack
-
-Next.js 16 (App Router) · AI SDK 7 · OpenRouter · Postgres 18 + pgvector 0.8 · Drizzle ·
-pg-boss · TanStack Query · zod 4 · Tailwind 4 · Vitest.
-
-Notable choices:
-
-- **No Redis.** The job queue lives in the same Postgres.
-- **No agent framework.** The RAG pipeline is written in plain code, on purpose, so every step is
-  visible.
-- **No `useEffect`.** A lint rule enforces it.
 
 ## Roadmap
 
