@@ -269,6 +269,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
       }
       await store.updatePage({
         pageId,
+        baseRevisionId: page.revisionId,
         bodyMd: updated.bodyMd,
         reason: proposalReason(payload.toSha, `update after changes to ${cited.join(", ") || "stale sources"}`),
         citations,

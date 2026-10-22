@@ -1,24 +1,13 @@
 import { z } from "zod";
+import { MAX_PAGE_PATH_LENGTH, pageTitleSchema } from "@/wiki/title";
 import { parseSourceHref } from "@/lib/source-links";
 import type { Citation } from "@/core/contracts";
 
-/** Azure DevOps caps a page's full path at 235 characters. */
-export const MAX_WIKI_PATH = 235;
+/** Title rules live with the wiki store; the agent only adds path-shape checks on top. */
+export { pageTitleSchema };
+export const MAX_WIKI_PATH = MAX_PAGE_PATH_LENGTH;
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
-
-/**
- * Local mirror of Track B's title rules (src/wiki/title.ts); the lead swaps this import at merge.
- * No `/ \ #`, no leading/trailing `.`, no control characters.
- */
-export const pageTitleSchema = z
-  .string()
-  .trim()
-  .min(1, "title is empty")
-  .max(MAX_WIKI_PATH, "title is too long")
-  .refine((t) => !/[/\\#]/.test(t), "title must not contain / \\ or #")
-  .refine((t) => !t.startsWith(".") && !t.endsWith("."), "title must not start or end with '.'")
-  .refine((t) => !CONTROL.test(t), "title must not contain control characters");
 
 /**
  * A display path ("Architecture/Ingestion") from the model. Resolved to an id server-side, so a

@@ -12,7 +12,7 @@ const DiffViewer = dynamic(() => import("react-diff-viewer-continued"), {
 });
 
 /** Current page body (fetched) against the body the agent wants to write. */
-export function PageDiff({ path, newBody }: { path: string; newBody: string }) {
+export function PageDiff({ path, newBody, baseRevision }: { path: string; newBody: string; baseRevision: string }) {
   const current = useQuery({
     queryKey: queryKeys.chat.pageBody(path),
     queryFn: () => chatApi.pageBody(path),
@@ -21,8 +21,13 @@ export function PageDiff({ path, newBody }: { path: string; newBody: string }) {
   if (current.isPending) return <p className="p-2 text-xs text-muted">Loading current page…</p>;
   if (current.isError) return <p className="p-2 text-xs text-danger">Couldn&apos;t load the current page: {current.error.message}</p>;
   return (
-    <div className="max-h-72 overflow-auto rounded border border-line text-xs">
-      <DiffViewer oldValue={current.data.bodyMd} newValue={newBody} splitView={false} hideLineNumbers showDiffOnly />
-    </div>
+    <>
+      {current.data.revisionId !== baseRevision && (
+        <p className="mb-1 text-xs text-warning">This page changed after the agent read it. Approving will fail; ask it to re-read.</p>
+      )}
+      <div className="max-h-72 overflow-auto rounded border border-line text-xs">
+        <DiffViewer oldValue={current.data.bodyMd} newValue={newBody} splitView={false} hideLineNumbers showDiffOnly />
+      </div>
+    </>
   );
 }

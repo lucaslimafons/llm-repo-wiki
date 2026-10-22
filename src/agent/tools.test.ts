@@ -177,7 +177,7 @@ describe("approval gating", () => {
   it.each([
     ["deletePage", { path: "Overview" }],
     ["movePage", { path: "Overview", newParentPath: "Guides" }],
-    ["updatePage", { path: "Overview", bodyMd: "new", reason: "r", citations: [] }],
+    ["updatePage", { path: "Overview", baseRevision: "3f2b9c1e-8a4d-4c2e-9b1a-0d5e6f7a8b9c", bodyMd: "new", reason: "r", citations: [] }],
   ])("%s waits for user approval and does not write", async (name, input) => {
     const { approvals, writes } = await runTool(name, input);
     expect(approvals).toHaveLength(1);

@@ -9,5 +9,5 @@ export async function GET(req: Request) {
   if (!path.success) return Response.json({ error: "invalid path" }, { status: 400 });
   const page = await wikiStore.getPage({ path: path.data });
   if (!page) return Response.json({ error: "page not found" }, { status: 404 });
-  return Response.json({ path: page.path, bodyMd: page.bodyMd });
+  return Response.json({ path: page.path, bodyMd: page.bodyMd, revisionId: page.revisionId });
 }

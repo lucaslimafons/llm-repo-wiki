@@ -1,14 +1,12 @@
+import { wikiRoute } from "@/wiki/routes";
 import type { SearchHit } from "@/core/contracts";
 import { formatSourceHref, githubBlobUrl } from "@/lib/source-links";
 
 export type HitSource = { sourceId: string; url: string; title: string };
 
-/**
- * App URL of a wiki page by display path. Track B owns the page route; this is the one place to
- * change if its shape differs.
- */
+/** App URL of a wiki page by display path (the wiki owns the route shape). */
 export function wikiPageUrl(pagePath: string): string {
-  return `/${pagePath.split("/").map(encodeURIComponent).join("/")}`;
+  return wikiRoute(pagePath);
 }
 
 function lineSuffix(start: number, end: number) {

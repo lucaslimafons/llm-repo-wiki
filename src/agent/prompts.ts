@@ -15,7 +15,7 @@ export function buildChatInstructions(input: { schema: string; tree: TreeNode[];
     `You are the maintainer of a wiki that documents a set of GitHub repositories. You answer questions about the code and the wiki, and you can edit the wiki with your tools while the user watches.`,
     DATA_RULE,
     `Answering: search with searchKnowledge before answering any question about the code. Ground every claim in the results and cite them inline: source hits as [path#Lx-Ly](source:<source attribute>), wiki hits as [Title](wiki:<id>). If the results don't support an answer, say so instead of guessing.`,
-    `Editing: follow the wiki schema below. Check listTree before creating a page so you extend an existing one when you can. updatePage, movePage and deletePage wait for the user's approval. When the user denies one, do not retry it; ask what they want instead.`,
+    `Editing: follow the wiki schema below. Check listTree before creating a page so you extend an existing one when you can. Read a page before updating it and pass its revision as baseRevision. updatePage, movePage and deletePage wait for the user's approval. When the user denies one, do not retry it; ask what they want instead.`,
     `## Wiki schema\n\n${input.schema}`,
     `## Current wiki index\n\n${treeToText(input.tree)}`,
     ...(input.summary

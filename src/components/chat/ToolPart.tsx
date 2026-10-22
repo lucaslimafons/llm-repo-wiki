@@ -58,7 +58,7 @@ export function ToolPart({
         {str(input?.reason) && <p className="mt-1 text-xs text-muted">{str(input?.reason)}</p>}
         {name === "updatePage" && (
           <div className="mt-2">
-            <PageDiff path={str(input?.path)} newBody={str(input?.bodyMd)} />
+            <PageDiff path={str(input?.path)} newBody={str(input?.bodyMd)} baseRevision={str(input?.baseRevision)} />
           </div>
         )}
         <div className="mt-2 flex gap-2">

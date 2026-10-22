@@ -19,5 +19,5 @@ export const chatApi = {
   messages: (id: string) =>
     fetch(`/api/chats/${id}`).then((r) => json<{ id: string; title: string | null; messages: WikiUIMessage[] }>(r)),
   pageBody: (path: string) =>
-    fetch(`/api/chat/page?${new URLSearchParams({ path })}`).then((r) => json<{ path: string; bodyMd: string }>(r)),
+    fetch(`/api/chat/page?${new URLSearchParams({ path })}`).then((r) => json<{ path: string; bodyMd: string; revisionId: string | null }>(r)),
 };

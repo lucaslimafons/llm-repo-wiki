@@ -17,7 +17,7 @@ describe("hitToSource", () => {
     const s = hitToSource({ kind: "wiki", pageId: "11111111-1111-4111-8111-111111111111", pagePath: "Architecture/Ingest flow", headingPath: "Retries", content: "", score: 1 });
     expect(s).toEqual({
       sourceId: "wiki:11111111-1111-4111-8111-111111111111#Retries",
-      url: "/Architecture/Ingest%20flow",
+      url: "/wiki/Architecture/Ingest%20flow",
       title: "wiki/Architecture/Ingest flow › Retries",
     });
   });

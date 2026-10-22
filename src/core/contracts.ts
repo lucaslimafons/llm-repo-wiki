@@ -106,6 +106,8 @@ export type UpdatePageInput = {
   pageId: string;
   bodyMd: string;
   title?: string;
+  /** The revision the writer read. If the page moved on since, the write is refused as a conflict. */
+  baseRevisionId?: string | null;
   reason: string;
   citations: Citation[];
   author: Author;

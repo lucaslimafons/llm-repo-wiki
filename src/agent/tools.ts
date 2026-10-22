@@ -123,13 +123,14 @@ export function createWikiTools(deps: WikiToolDeps) {
           title: page.title,
           stale: page.stale,
           proposalOnly: page.revisionId === null,
+          revision: page.revisionId,
           bodyMd: page.bodyMd,
           citations: page.citations.map(formatSourceHref),
         };
       },
       toModelOutput: ({ output }) => ({
         type: "text",
-        value: `Page "${output.path}"${output.stale ? " (stale)" : ""}. Citations: ${output.citations.length}.\n${wrapRetrieved(`wiki/${output.path}`, output.bodyMd)}`,
+        value: `Page "${output.path}"${output.stale ? " (stale)" : ""}. Revision: ${output.revision ?? "none (proposal only)"}. Citations: ${output.citations.length}.\n${wrapRetrieved(`wiki/${output.path}`, output.bodyMd)}`,
       }),
     }),
 
@@ -154,16 +155,18 @@ export function createWikiTools(deps: WikiToolDeps) {
     }),
 
     updatePage: tool({
-      description: "Replace the body of an existing wiki page. Needs the user's approval.",
+      description:
+        "Replace the body of an existing wiki page. Call readPage first and pass its revision as baseRevision. Needs the user's approval.",
       inputSchema: z.object({
         path: wikiPathSchema,
+        baseRevision: z.uuid().describe("The revision readPage returned for this page."),
         bodyMd: bodySchema,
         reason: reasonSchema,
         citations: citationsSchema,
       }),
-      execute: async ({ path, bodyMd, reason, citations }) => {
+      execute: async ({ path, baseRevision, bodyMd, reason, citations }) => {
         const page = await resolve(path);
-        await store.updatePage({ pageId: page.id, bodyMd, reason, citations, author, mode });
+        await store.updatePage({ pageId: page.id, baseRevisionId: baseRevision, bodyMd, reason, citations, author, mode });
         return { path, status: mode === "apply" ? "applied" : "proposed" };
       },
     }),
