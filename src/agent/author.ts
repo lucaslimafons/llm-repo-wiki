@@ -90,8 +90,8 @@ async function allPages(store: WikiStore): Promise<PageView[]> {
 
 /**
  * The author-wiki job. First run: plan an outline under the page budget, then write each page.
- * Later runs: re-propose only the pages that cite changed files. Every write is a proposal; this
- * job has no delete or move tool at all.
+ * Later runs: re-propose stale pages and pages citing changed files, then place uncovered changes.
+ * Every write is a proposal; this job has no delete or move tool at all.
  */
 export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Promise<AuthorResult> {
   const { db, store } = deps;
@@ -103,6 +103,8 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
   const [repo] = await db.select().from(repos).where(eq(repos.id, payload.repoId));
   if (!repo) return result;
   const repoName = `${repo.owner}/${repo.name}`;
+  // A coalesced job carries an older payload; the index is at synced_sha, so write against that.
+  const toSha = repo.syncedSha ?? payload.toSha;
 
   const run = await startAgentRun(db, { kind: "author", model: modelName(deps.model) });
   const author = { kind: "agent" as const, agentRunId: run.id };
@@ -113,7 +115,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
     author,
     mode: "propose",
   });
-  const instructions = buildAuthorInstructions({ schema: await (deps.loadSchema ?? loadWikiSchema)(), repo: repoName, sha: payload.toSha });
+  const instructions = buildAuthorInstructions({ schema: await (deps.loadSchema ?? loadWikiSchema)(), repo: repoName, sha: toSha });
   const overBudget = () => {
     const t = run.totals();
     return t.inputTokens + t.outputTokens >= tokenBudget;
@@ -133,7 +135,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
     return out.output;
   }
 
-  await log(db, "author.started", { repoId: repo.id, details: { runId: run.id, fromSha: payload.fromSha, toSha: payload.toSha, changed: payload.changedPaths.length } });
+  await log(db, "author.started", { repoId: repo.id, details: { runId: run.id, fromSha: payload.fromSha, toSha, changed: payload.changedPaths.length } });
   try {
     const existing = await allPages(store);
     const citing = existing.filter((p) => p.citations.some((c) => c.repo === repoName));
@@ -226,7 +228,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
       parentId: parent?.id ?? null,
       title,
       bodyMd: page.bodyMd,
-      reason: proposalReason(payload.toSha, purpose),
+      reason: proposalReason(toSha, purpose),
       citations,
       author,
       mode: "propose",
@@ -243,41 +245,91 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
         result.status = "budget_exceeded";
         return;
       }
-      const pageId = page.id;
-      if (page.revisionId === null) {
-        result.skipped.push({ path: page.path, reason: "still an unreviewed proposal" });
-        continue;
-      }
-      const revisions = await store.listRevisions(pageId);
-      if (revisions.some((r) => r.status === "proposed" && r.reason?.startsWith(proposalReason(payload.toSha, "")))) {
-        result.skipped.push({ path: page.path, reason: "already proposed for this sha" });
-        continue;
-      }
       const cited = [...new Set(page.citations.filter((c) => c.repo === repoName && changed.has(c.path)).map((c) => c.path))];
-      const updated = await draft(
-        [
-          `The repository ${repoName} changed (${payload.fromSha ?? "?"} → ${payload.toSha}). Update the wiki page "${page.path}" so it matches the code at ${payload.toSha}.`,
-          `Changed files this page cites: ${cited.length ? cited.join(", ") : "(none; the page was marked stale)"}.`,
-          `Search the changed files again, keep what is still true, fix what changed, and cite the new lines. The current page:`,
-          wrapRetrieved(`wiki/${page.path}`, page.bodyMd),
-        ].join("\n\n"),
-      );
-      const citations = collectCitations(repoName, updated.bodyMd, updated.citations);
-      if (citations.length === 0) {
-        await drop(page.path, "the updated draft cited no sources", pageId);
+      await proposeUpdate(page, [
+        `The repository ${repoName} changed (${payload.fromSha ?? "?"} → ${toSha}). Update the wiki page "${page.path}" so it matches the code at ${toSha}.`,
+        `Changed files this page cites: ${cited.length ? cited.join(", ") : "(none; the page was marked stale)"}.`,
+        `Search the changed files again, keep what is still true, fix what changed, and cite the new lines.`,
+      ], `update after changes to ${cited.join(", ") || "stale sources"}`);
+    }
+    await writeUncovered(citing);
+  }
+
+  /** Changed files no page cites: extend the page that should own them, or propose a new one. */
+  async function writeUncovered(citing: PageView[]) {
+    const covered = new Set(citing.flatMap((p) => p.citations.filter((c) => c.repo === repoName).map((c) => c.path)));
+    const uncovered = payload.changedPaths.filter((path) => !covered.has(path)).slice(0, 40);
+    if (uncovered.length === 0 || overBudget()) return;
+
+    const room = Math.max(0, maxPages - citing.length);
+    const plan = await generateText({
+      model: deps.model,
+      instructions,
+      prompt: [
+        `These files in ${repoName} changed and no wiki page cites them:\n${uncovered.map((p) => `- ${p}`).join("\n")}`,
+        `Plan an OUTLINE of the pages that should cover them. Prefer an EXISTING page path when one fits (it will be extended); propose a new path only for a genuinely new topic (at most ${room} new pages). Return an empty list when none of it matters to a reader (tests, config churn, formatting).`,
+        `Existing wiki index:\n${treeToText(await store.listTree())}`,
+      ].join("\n\n"),
+      tools: { searchKnowledge },
+      output: Output.object({ schema: outlineSchema }),
+      stopWhen: isStepCount(maxSteps),
+      maxOutputTokens: 2_000,
+      onStepEnd: (step) => run.addStep(step),
+    });
+
+    let created = 0;
+    for (const item of plan.output.pages) {
+      if (overBudget()) {
+        result.status = "budget_exceeded";
+        return;
+      }
+      const path = wikiPathSchema.safeParse(item.path.trim());
+      if (!path.success) {
+        await drop(item.path, "invalid path");
         continue;
       }
-      await store.updatePage({
-        pageId,
-        baseRevisionId: page.revisionId,
-        bodyMd: updated.bodyMd,
-        reason: proposalReason(payload.toSha, `update after changes to ${cited.join(", ") || "stale sources"}`),
-        citations,
-        author,
-        mode: "propose",
-      });
-      result.proposed.push(page.path);
-      await log(db, "author.page_proposed", { repoId: repo.id, pageId, details: { runId: run.id, path: page.path, citations: citations.length, update: true } });
+      const page = await store.getPage({ path: path.data });
+      if (page) {
+        await proposeUpdate(page, [
+          `Extend the wiki page "${page.path}" so it also covers: ${item.purpose}`,
+          `Files that changed at ${toSha} and no page covers yet: ${uncovered.join(", ")}. Search them, keep the existing content, and cite every new claim.`,
+        ], `extend to cover ${item.purpose}`);
+      } else if (created < room) {
+        created++;
+        await writeNewPage(path.data, item.purpose, item.queries);
+      } else {
+        await drop(path.data, `page budget of ${maxPages} reached`);
+      }
     }
+  }
+
+  async function proposeUpdate(page: PageView, header: string[], why: string) {
+    const pageId = page.id;
+    if (page.revisionId === null) {
+      result.skipped.push({ path: page.path, reason: "still an unreviewed proposal" });
+      return;
+    }
+    const revisions = await store.listRevisions(pageId);
+    if (revisions.some((r) => r.status === "proposed" && r.reason?.startsWith(proposalReason(toSha, "")))) {
+      result.skipped.push({ path: page.path, reason: "already proposed for this sha" });
+      return;
+    }
+    const updated = await draft([...header, `The current page:`, wrapRetrieved(`wiki/${page.path}`, page.bodyMd)].join("\n\n"));
+    const citations = collectCitations(repoName, updated.bodyMd, updated.citations);
+    if (citations.length === 0) {
+      await drop(page.path, "the updated draft cited no sources", pageId);
+      return;
+    }
+    await store.updatePage({
+      pageId,
+      baseRevisionId: page.revisionId,
+      bodyMd: updated.bodyMd,
+      reason: proposalReason(toSha, why),
+      citations,
+      author,
+      mode: "propose",
+    });
+    result.proposed.push(page.path);
+    await log(db, "author.page_proposed", { repoId: repo.id, pageId, details: { runId: run.id, path: page.path, citations: citations.length, update: true } });
   }
 }

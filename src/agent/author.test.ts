@@ -170,6 +170,32 @@ describe("author-wiki: incremental run", () => {
   });
 });
 
+describe("author-wiki: uncovered changes", () => {
+  it("extends an existing page or proposes a new one for changed files no page cites", async () => {
+    const fake = createFakeStore();
+    const c = (path: string) => ({ repo: "acme/api", path, commitSha: SHA, startLine: 1, endLine: 20 });
+    fake.seed("Architecture", "# Architecture", [c("src/index.ts")]);
+    fake.seed("Architecture/Server", "# Server", [c("src/server.ts")]);
+
+    const model = authorModel(["Architecture/Server", "Architecture/Billing"], goodDraft);
+    const payload = { repoId, fromSha: "1111111", toSha: SHA, changedPaths: ["src/billing.ts"] };
+    const result = await runAuthorJob(deps(model, fake).d, payload);
+
+    expect(result.proposed.sort()).toEqual(["Architecture/Billing", "Architecture/Server"]);
+    const writes = fake.writes();
+    expect(writes.map((w) => w.method).sort()).toEqual(["createPage", "updatePage"]);
+    expect(writes.every((w) => (w.input as { mode: string }).mode === "propose")).toBe(true);
+  });
+
+  it("makes no planning call when every changed file is already cited", async () => {
+    const fake = createFakeStore();
+    fake.seed("Architecture/Server", "# Server", [{ repo: "acme/api", path: "src/server.ts", commitSha: SHA, startLine: 1, endLine: 20 }]);
+    const model = authorModel(["Should/Not/Appear"], goodDraft);
+    const result = await runAuthorJob(deps(model, fake).d, { repoId, fromSha: "1111111", toSha: SHA, changedPaths: ["src/server.ts"] });
+    expect(result.proposed).toEqual(["Architecture/Server"]);
+  });
+});
+
 describe("collectCitations", () => {
   it("merges body links with the returned list, dedupes, and keeps only this repo", () => {
     const body = `a [x](${cite("a.ts")}) b [y](${cite("a.ts")}) c [z](source:other/repo/b.ts#L1@${SHA})`;
