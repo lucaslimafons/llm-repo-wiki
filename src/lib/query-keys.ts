@@ -14,5 +14,7 @@ export const queryKeys = {
   chat: {
     all: ["chat"] as const,
     list: () => ["chat", "list"] as const,
+    messages: (chatId: string) => ["chat", "messages", chatId] as const,
+    pageBody: (path: string) => ["chat", "page-body", path] as const,
   },
 } as const;
