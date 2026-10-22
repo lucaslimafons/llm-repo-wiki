@@ -2,7 +2,7 @@
 import { db } from "@/db/client";
 import { createGitHubClient, type GitHubClient } from "@/github/client";
 import { enqueueRepoSync } from "@/jobs/queue";
-import { env } from "@/lib/env";
+import { env, openRouterKey } from "@/lib/env";
 import { createOpenRouterEmbedder, type Embedder } from "./embedder";
 import type { RepoDeps } from "./repos";
 
@@ -15,7 +15,7 @@ export function prodGitHub(): GitHubClient {
 }
 
 export function prodEmbedder(): Embedder {
-  embedder ??= createOpenRouterEmbedder({ apiKey: env().OPENROUTER_API_KEY, model: env().EMBEDDING_MODEL });
+  embedder ??= createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL });
   return embedder;
 }
 

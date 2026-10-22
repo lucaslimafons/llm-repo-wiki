@@ -2,11 +2,11 @@ import { z } from "zod";
 
 const envSchema = z.object({
   DATABASE_URL: z.url(),
-  OPENROUTER_API_KEY: z.string().min(1, "OPENROUTER_API_KEY is required"),
+  OPENROUTER_API_KEY: z.string().optional().transform((v) => v || undefined),
   GITHUB_TOKEN: z.string().optional().transform((v) => v || undefined),
   GITHUB_WEBHOOK_SECRET: z.string().optional().transform((v) => v || undefined),
-  CHAT_MODEL: z.string().default("anthropic/claude-sonnet-5.5"),
-  AUTHOR_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
+  CHAT_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
+  AUTHOR_MODEL: z.string().default("deepseek/deepseek-v4-flash-0731"),
   EMBEDDING_MODEL: z.string().default("openai/text-embedding-3-small"),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(5),
 });
@@ -19,4 +19,11 @@ let cached: Env | undefined;
 export function env(): Env {
   cached ??= envSchema.parse(process.env);
   return cached;
+}
+
+/** Required only where a model or embedding is called, so the wiki stays browsable without a key. */
+export function openRouterKey(): string {
+  const key = env().OPENROUTER_API_KEY;
+  if (!key) throw new Error("OPENROUTER_API_KEY is not set. Add it to .env.local (see .env.example).");
+  return key;
 }

@@ -5,7 +5,7 @@ import { db as defaultDb, type Db } from "@/db/client";
 import { chunks, repos, revisionSources, wikiChunks } from "@/db/schema";
 import { repoFullNameSchema } from "@/github/repo-name";
 import { createOpenRouterEmbedder, toVector, type Embedder } from "@/ingest/embedder";
-import { env } from "@/lib/env";
+import { env, openRouterKey } from "@/lib/env";
 import { pagePaths } from "./page-path";
 
 export const RRF_K = 60;
@@ -27,7 +27,7 @@ let defaults: SearchDeps | undefined;
 function defaultDeps(): SearchDeps {
   defaults ??= {
     db: defaultDb(),
-    embedder: createOpenRouterEmbedder({ apiKey: env().OPENROUTER_API_KEY, model: env().EMBEDDING_MODEL }),
+    embedder: createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL }),
   };
   return defaults;
 }

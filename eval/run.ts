@@ -1,7 +1,7 @@
 /**
  * Retrieval eval: recall@5 and MRR@10 for vector-only, full-text-only and hybrid over a pinned
  * commit of a public repo. Syncs that commit first (real embeddings, so it needs
- * OPENROUTER_API_KEY). Run: pnpm tsx --env-file=.env.local eval/run.ts
+ * OPENROUTER_API_KEY). Run: pnpm eval
  */
 import { readFile } from "node:fs/promises";
 import { and, eq } from "drizzle-orm";
@@ -13,7 +13,7 @@ import { parseRepoFullName } from "@/github/repo-name";
 import { createDefaultChunker } from "@/ingest/chunk";
 import { createOpenRouterEmbedder } from "@/ingest/embedder";
 import { syncRepo } from "@/ingest/sync";
-import { env } from "@/lib/env";
+import { env, openRouterKey } from "@/lib/env";
 import { searchWithMode, type SearchMode } from "@/search";
 
 const goldenSchema = z.object({
@@ -30,7 +30,7 @@ async function main() {
   const ref = parseRepoFullName(golden.repo);
   const database = db();
   const github = createGitHubClient({ token: env().GITHUB_TOKEN });
-  const embedder = createOpenRouterEmbedder({ apiKey: env().OPENROUTER_API_KEY, model: env().EMBEDDING_MODEL });
+  const embedder = createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL });
 
   // Pin the repo to the golden commit so the expected paths are guaranteed to exist.
   let [repo] = await database.select().from(repos).where(and(eq(repos.owner, ref.owner), eq(repos.name, ref.name)));

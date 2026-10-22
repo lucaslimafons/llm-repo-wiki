@@ -1,12 +1,12 @@
 import { hkdfSync } from "node:crypto";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
-import { env } from "@/lib/env";
+import { env, openRouterKey } from "@/lib/env";
 
 let provider: ReturnType<typeof createOpenRouter> | undefined;
 
 function openrouter() {
-  provider ??= createOpenRouter({ apiKey: env().OPENROUTER_API_KEY });
+  provider ??= createOpenRouter({ apiKey: openRouterKey() });
   return provider;
 }
 
@@ -34,7 +34,7 @@ let approvalSecret: Uint8Array | undefined;
  */
 export function toolApprovalSecret(): Uint8Array {
   approvalSecret ??= new Uint8Array(
-    hkdfSync("sha256", env().OPENROUTER_API_KEY, "llm-repo-wiki", "tool-approval-v1", 32),
+    hkdfSync("sha256", openRouterKey(), "llm-repo-wiki", "tool-approval-v1", 32),
   );
   return approvalSecret;
 }

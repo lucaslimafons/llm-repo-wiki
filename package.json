@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "worker": "tsx --env-file=.env.local src/worker.ts",
@@ -15,7 +15,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=.env.local src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "setup": "docker compose up -d --wait db && pnpm db:migrate"
+    "setup": "docker compose up -d --wait db && pnpm db:migrate",
+    "eval": "tsx --env-file=.env.local eval/run.ts",
+    "export": "tsx --env-file=.env.local src/export/cli.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.152",
