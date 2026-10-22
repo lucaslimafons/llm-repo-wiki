@@ -1,7 +1,27 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Parser, type ReadEntry } from "tar";
+import { z } from "zod";
 import type { RepoRef } from "./repo-name";
+
+const repoPathString = z.string().min(1).max(1024);
+
+const repoResponseSchema = z.object({
+  default_branch: z.string().min(1),
+  private: z.boolean().default(false),
+});
+
+const compareResponseSchema = z.object({
+  files: z
+    .array(
+      z.object({
+        filename: repoPathString,
+        status: z.enum(["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"]),
+        previous_filename: repoPathString.optional(),
+      }),
+    )
+    .default([]),
+});
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -62,13 +82,19 @@ export function createGitHubClient(opts: { token?: string; fetch?: FetchLike; ba
     return res;
   }
 
+  /** GitHub's JSON is external input: parse it, so a shape change fails loudly instead of indexing garbage. */
+  async function parse<T>(res: Response, schema: z.ZodType<T>, what: string): Promise<T> {
+    const parsed = schema.safeParse(await res.json());
+    if (!parsed.success) throw new GitHubError(`GitHub: unexpected ${what} response`, 502);
+    return parsed.data;
+  }
+
   const repoPath = (r: RepoRef) => `/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.name)}`;
 
   return {
     async getRepo(repo) {
-      const json = (await (await call(repoPath(repo))).json()) as { default_branch?: unknown; private?: unknown };
-      if (typeof json.default_branch !== "string") throw new GitHubError("GitHub: missing default_branch", 502);
-      return { defaultBranch: json.default_branch, private: json.private === true };
+      const json = await parse(await call(repoPath(repo)), repoResponseSchema, "repo");
+      return { defaultBranch: json.default_branch, private: json.private };
     },
 
     async getHeadSha(repo, branch) {
@@ -95,10 +121,7 @@ export function createGitHubClient(opts: { token?: string; fetch?: FetchLike; ba
         if (err instanceof GitHubError && (err.status === 404 || err.status === 422)) return { tooLarge: true };
         throw err;
       }
-      const json = (await res.json()) as {
-        files?: { filename: string; status: string; previous_filename?: string }[];
-      };
-      const raw = json.files ?? [];
+      const raw = (await parse(res, compareResponseSchema, "compare")).files;
       if (raw.length >= COMPARE_FILE_CAP) return { tooLarge: true };
       const files: CompareFile[] = [];
       for (const f of raw) {

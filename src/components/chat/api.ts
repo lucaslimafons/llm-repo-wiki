@@ -1,25 +1,16 @@
-import type { ChatSummary } from "@/agent/chat-store";
-import type { WikiUIMessage } from "@/agent/tools";
-
-async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `${res.status} ${res.statusText}`);
-  }
-  return res.json() as Promise<T>;
-}
+import { z } from "zod";
+import { chatMessagesSchema, chatSummarySchema, pageBodySchema } from "@/core/api-schemas";
+import { fetchJson } from "@/lib/fetch-json";
 
 export const chatApi = {
-  list: () => fetch("/api/chats").then((r) => json<ChatSummary[]>(r)),
-  create: () => fetch("/api/chats", { method: "POST" }).then((r) => json<ChatSummary>(r)),
+  list: () => fetchJson("/api/chats", z.array(chatSummarySchema)),
+  create: () => fetchJson("/api/chats", chatSummarySchema, { method: "POST" }),
   remove: async (id: string) => {
-    const res = await fetch(`/api/chats/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!res.ok && res.status !== 404) throw new Error(`delete failed: ${res.status}`);
   },
-  messages: (id: string) =>
-    fetch(`/api/chats/${id}`).then((r) => json<{ id: string; title: string | null; messages: WikiUIMessage[] }>(r)),
+  messages: (id: string) => fetchJson(`/api/chats/${encodeURIComponent(id)}`, chatMessagesSchema),
   /** 404 just means the run already ended. */
-  stop: (id: string) => fetch(`/api/chats/${id}/stop`, { method: "POST" }).then(() => undefined),
-  pageBody: (path: string) =>
-    fetch(`/api/chat/page?${new URLSearchParams({ path })}`).then((r) => json<{ path: string; bodyMd: string; revisionId: string | null }>(r)),
+  stop: (id: string) => fetch(`/api/chats/${encodeURIComponent(id)}/stop`, { method: "POST" }).then(() => undefined),
+  pageBody: (path: string) => fetchJson(`/api/chat/page?${new URLSearchParams({ path })}`, pageBodySchema),
 };

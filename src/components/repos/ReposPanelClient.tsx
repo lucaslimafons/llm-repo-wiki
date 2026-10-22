@@ -5,15 +5,13 @@ import { AlertCircle, CheckCircle2, Clock, GitBranch, Loader2, Plus, RefreshCw, 
 import { useState, type FormEvent } from "react";
 import { addRepoAction, removeRepoAction, syncRepoNowAction } from "@/ingest/actions";
 import type { ActionResult, RepoListItem } from "@/ingest/repos";
+import { repoListSchema } from "@/core/api-schemas";
+import { fetchJson } from "@/lib/fetch-json";
 import { queryKeys } from "@/lib/query-keys";
 
 const POLL_MS = 2000;
 
-async function fetchRepos(): Promise<RepoListItem[]> {
-  const res = await fetch("/api/repos", { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to load repositories (${res.status})`);
-  return res.json();
-}
+const fetchRepos = () => fetchJson("/api/repos", repoListSchema);
 
 /** Unwraps an action result so a refusal surfaces as a mutation error, not a silent success. */
 async function unwrap<T>(p: Promise<ActionResult<T>>): Promise<T> {

@@ -99,6 +99,17 @@ describe("GitHub client", () => {
     expect(await createGitHubClient({ fetch }).compare(repo, SHA, SHA)).toEqual({ tooLarge: true });
   });
 
+  it.each([
+    ["a repo without default_branch", "getRepo", { private: false }],
+    ["a compare file with an unknown status", "compare", { files: [{ filename: "a.ts", status: "exploded" }] }],
+    ["a compare file with an empty filename", "compare", { files: [{ filename: "", status: "added" }] }],
+  ])("rejects %s instead of indexing it", async (_name, method, body) => {
+    const { fetch } = fakeFetch(() => Response.json(body));
+    const client = createGitHubClient({ fetch });
+    const call = method === "getRepo" ? client.getRepo(repo) : client.compare(repo, SHA, SHA);
+    await expect(call).rejects.toThrow(/unexpected (repo|compare) response/);
+  });
+
   describe("tarball", () => {
     let dir: string;
     afterAll(() => rm(dir, { recursive: true, force: true }));

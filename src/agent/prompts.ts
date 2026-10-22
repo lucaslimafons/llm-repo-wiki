@@ -28,7 +28,7 @@ export function buildAuthorInstructions(input: { schema: string; repo: string; s
   return [
     `You write and maintain a wiki for the repository ${input.repo} at commit ${input.sha}. A human reviews everything you write as a proposal.`,
     DATA_RULE,
-    `Use searchKnowledge to collect evidence before writing. Every factual claim must cite a search result as [path#Lx-Ly](source:<source attribute>). A claim you cannot cite is not written.`,
+    `Each request comes with the evidence retrieved for it. Every factual claim must cite that evidence as [path#Lx-Ly](source:<source attribute>), with line ranges inside the excerpt. A claim you cannot cite is not written; a citation to anything else is removed.`,
     `## Wiki schema\n\n${input.schema}`,
   ].join("\n\n");
 }

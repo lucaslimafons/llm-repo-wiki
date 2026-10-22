@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { SearchHit } from "@/core/contracts";
 import { agentRuns, repos, wikiLog } from "@/db/schema";
 import { resetDb, testDb } from "@/test/db";
-import { collectCitations, runAuthorJob, type AuthorDeps } from "./author";
+import { collectCitations, groundDraft, runAuthorJob, type AuthorDeps } from "./author";
 import { createFakeStore } from "./testing/fake-store";
 import { usage } from "./testing/mock-model";
 
@@ -25,20 +25,15 @@ const hit: SearchHit = {
 };
 
 /**
- * Plays an author model: the first call of each conversation searches, the call after the tool
- * result answers with JSON (the outline, or a page draft from `drafts`).
+ * Plays an author model: it answers every request with JSON straight away (the job retrieves, so no
+ * tool calls), the outline when the prompt asks for one, otherwise a page draft from `drafts`.
  */
 function authorModel(outline: string[], drafts: (title: string) => { bodyMd: string; citations: string[] }) {
-  let n = 0;
   return new MockLanguageModelV4({
     modelId: "mock-author",
     doGenerate: async ({ prompt }) => {
-      const last = prompt.at(-1)!;
       const firstUser = JSON.stringify(prompt.find((m) => m.role === "user"));
       const base = { finishReason: { unified: "stop" as const, raw: undefined }, usage: usage(100, 50), providerMetadata: { openrouter: { usage: { cost: 0.002 } } }, warnings: [] };
-      if (last.role !== "tool") {
-        return { ...base, finishReason: { unified: "tool-calls" as const, raw: undefined }, content: [{ type: "tool-call" as const, toolCallId: `c${++n}`, toolName: "searchKnowledge", input: JSON.stringify({ query: "how", scope: "source" }) }] };
-      }
       if (firstUser.includes("OUTLINE")) {
         const pages = outline.map((path) => ({ path, purpose: `About ${path}`, queries: ["q"] }));
         return { ...base, content: [{ type: "text" as const, text: JSON.stringify({ pages }) }] };
@@ -88,7 +83,7 @@ describe("author-wiki: first run", () => {
     expect(result.mode).toBe("initial");
     expect(result.proposed).toEqual(["Overview", "Architecture", "Architecture/Server"]);
     expect(result.dropped).toEqual([
-      { path: "Glossary", reason: "the draft cited no sources" },
+      { path: "Glossary", reason: "the draft cited no retrieved source" },
       { path: "../evil", reason: "invalid path" },
       { path: "Guides", reason: "page budget of 4 reached" },
     ]);
@@ -122,7 +117,7 @@ describe("author-wiki: first run", () => {
     expect(actions.filter((a) => a === "author.page_proposed")).toHaveLength(3);
     expect(actions).toContain("author.started");
     expect(actions).toContain("author.finished");
-    expect(logs.find((l) => l.action === "author.page_dropped" && l.details?.path === "Glossary")?.details?.reason).toBe("the draft cited no sources");
+    expect(logs.find((l) => l.action === "author.page_dropped" && l.details?.path === "Glossary")?.details?.reason).toBe("the draft cited no retrieved source");
   });
 
   it("a retried job doesn't duplicate proposals", async () => {
@@ -193,6 +188,38 @@ describe("author-wiki: uncovered changes", () => {
     const model = authorModel(["Should/Not/Appear"], goodDraft);
     const result = await runAuthorJob(deps(model, fake).d, { repoId, fromSha: "1111111", toSha: SHA, changedPaths: ["src/server.ts"] });
     expect(result.proposed).toEqual(["Architecture/Server"]);
+  });
+});
+
+describe("author-wiki: grounding", () => {
+  it("strips citations to anything the job did not retrieve, and drops a page left uncited", async () => {
+    const invented = (title: string) => ({
+      bodyMd: `# ${title}\n\nReal [a](${cite("src/server.ts")}). Made up [b](source:acme/api/src/secret.ts#L1-L5@${SHA}).`,
+      citations: [cite("src/server.ts"), `source:acme/api/src/secret.ts#L1-L5@${SHA}`],
+    });
+    const { d, fake } = deps(authorModel(["Overview"], invented));
+    await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+    const [write] = fake.writes();
+    const input = write.input as { bodyMd: string; citations: { path: string }[] };
+    expect(input.citations.map((c) => c.path)).toEqual(["src/server.ts"]);
+    expect(input.bodyMd).toContain("Made up b.");
+    expect(input.bodyMd).not.toContain("src/secret.ts");
+
+    const onlyInvented = () => ({ bodyMd: `x [b](source:acme/api/src/secret.ts#L1-L5@${SHA})`, citations: [] });
+    const second = deps(authorModel(["Glossary"], onlyInvented));
+    const result = await runAuthorJob(second.d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+    expect(result.dropped).toEqual([{ path: "Glossary", reason: "the draft cited no retrieved source" }]);
+  });
+
+  it("rejects a cited line range outside the retrieved chunk", () => {
+    const out = groundDraft("acme/api", { bodyMd: `x [a](source:acme/api/src/server.ts#L15-L40@${SHA})`, citations: [] }, [hit]);
+    expect(out.citations).toEqual([]);
+    expect(out.rejected).toBe(1);
+  });
+
+  it("fails loudly on an empty outline instead of succeeding with no pages", async () => {
+    const { d } = deps(authorModel([], goodDraft));
+    await expect(runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] })).rejects.toThrow("outline came back empty");
   });
 });
 

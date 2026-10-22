@@ -41,7 +41,8 @@ export type SearchToolHit = {
 
 export type SearchToolOutput = { query: string; hits: SearchToolHit[] };
 
-function hitCite(hit: SearchHit): string {
+/** A hit's citable source attribute, as the model sees it inside <retrieved source="…">. */
+export function hitCite(hit: SearchHit): string {
   if (hit.kind === "source") {
     return formatSourceHref({ ...hit, startLine: hit.startLine, endLine: hit.endLine }).slice("source:".length);
   }
