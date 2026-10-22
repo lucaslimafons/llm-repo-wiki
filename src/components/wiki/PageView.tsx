@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 import type { PageView as Page } from "@/core/contracts";
 import type { WikiPaths } from "@/components/markdown/plugins";
 import { historyRoute, wikiRoute } from "@/wiki/routes";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { PageEditor } from "./PageEditor";
 
 /** Server-rendered body as `children`; edit mode swaps in the client editor with a live preview. */
@@ -105,8 +106,7 @@ export function PageView({
           {children}
 
           <section className="mt-10 border-t border-line pt-4">
-            <h2 className="mb-2 text-sm font-medium text-muted">Sources</h2>
-            {citations}
+            <Disclosure summary={<span className="text-sm">{`Sources (${page.citations.length})`}</span>}>{citations}</Disclosure>
           </section>
           <p className="mt-6 text-xs text-muted">Updated {page.updatedAt.slice(0, 16).replace("T", " ")} UTC</p>
         </>

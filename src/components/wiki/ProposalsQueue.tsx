@@ -8,6 +8,7 @@ import { acceptRevisionAction, rejectRevisionAction } from "@/app/(wiki)/actions
 import type { ProposalView } from "@/wiki/store";
 import { wikiRoute } from "@/wiki/routes";
 import { fetchProposals } from "./api";
+import { Disclosure } from "@/components/ui/Disclosure";
 import { CitationList } from "./CitationList";
 import { Diff } from "./Diff";
 import { RevisionMeta } from "./RevisionMeta";
@@ -94,10 +95,9 @@ function ProposalCard({ proposal: p }: { proposal: ProposalView }) {
           oldTitle={p.isNewPage ? "New page" : "Current"}
           newTitle="Proposed"
         />
-        <div>
-          <h3 className="mb-1 text-xs font-medium text-muted">Citations</h3>
+        <Disclosure summary={`Citations (${p.citations.length})`}>
           <CitationList citations={p.citations} />
-        </div>
+        </Disclosure>
       </div>
     </li>
   );

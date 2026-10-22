@@ -16,7 +16,8 @@ import { Markdown } from "@/components/markdown/Markdown";
 import { queryKeys } from "@/lib/query-keys";
 import { chatApi } from "./api";
 import { SourcesList } from "./SourcesList";
-import { ToolPart } from "./ToolPart";
+import { ToolActivity } from "./ToolActivity";
+import { needsApproval, ToolPart } from "./ToolPart";
 
 const WRITES = new Set<string>(WRITE_TOOL_NAMES);
 
@@ -39,8 +40,10 @@ function Message({ message, onRespond }: { message: WikiUIMessage; onRespond: (i
     );
   }
   const sources = message.parts.filter((p) => p.type === "source-url");
+  const activity = message.parts.filter(isToolUIPart).filter((p) => !needsApproval(p));
   return (
     <div className="min-w-0 text-sm">
+      <ToolActivity parts={activity} onRespond={onRespond} />
       {message.parts.map((part, i) => {
         if (part.type === "text") {
           return (
@@ -49,7 +52,8 @@ function Message({ message, onRespond }: { message: WikiUIMessage; onRespond: (i
             </div>
           );
         }
-        if (isToolUIPart(part)) return <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} />;
+        // Only approval cards render in place: everything else lives in the activity group above.
+        if (isToolUIPart(part) && needsApproval(part)) return <ToolPart key={part.toolCallId} part={part} onRespond={onRespond} />;
         return null;
       })}
       <SourcesList sources={sources} />

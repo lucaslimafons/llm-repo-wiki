@@ -7,7 +7,8 @@ import type { SearchToolOutput, WikiTools } from "@/agent/tools";
 import type { InferUITools } from "ai";
 import { PageDiff } from "./PageDiff";
 
-type Part = ToolUIPart<InferUITools<WikiTools>> | DynamicToolUIPart;
+export type ToolUIPartOfWiki = ToolUIPart<InferUITools<WikiTools>> | DynamicToolUIPart;
+type Part = ToolUIPartOfWiki;
 type Input = Record<string, unknown> | undefined;
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -95,10 +96,15 @@ export function ToolPart({
     );
 
   return (
-    <div className="my-1 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
-      {icon}
-      <span className="min-w-0 break-words">{label}</span>
-      {status}
+    <div className="my-1 flex min-w-0 items-start gap-1.5 text-xs text-muted">
+      <span className="mt-px shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1 break-words">{label}</span>
+      {status && <span className="shrink-0">{status}</span>}
     </div>
   );
+}
+
+/** Waiting on the user: these stay inline and expanded, never folded into the activity group. */
+export function needsApproval(part: Part): boolean {
+  return part.state === "approval-requested" && !part.approval.isAutomatic;
 }

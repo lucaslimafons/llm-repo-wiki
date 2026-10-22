@@ -1,14 +1,14 @@
 import { ExternalLink, FileText } from "lucide-react";
 import type { WikiUIMessage } from "@/agent/tools";
+import { Disclosure } from "@/components/ui/Disclosure";
 
 type SourcePart = Extract<WikiUIMessage["parts"][number], { type: "source-url" }>;
 
-/** Numbered in first-seen order; GitHub permalinks open in a new tab, wiki pages in place. */
+/** Collapsed by default so the answer reads first; numbered in first-seen order. */
 export function SourcesList({ sources }: { sources: SourcePart[] }) {
   if (sources.length === 0) return null;
   return (
-    <div className="mt-2 border-t border-line pt-2">
-      <p className="mb-1 text-xs font-medium text-muted">Sources</p>
+    <Disclosure summary={`Sources (${sources.length})`} className="mt-2 border-t border-line pt-2">
       <ol className="space-y-0.5 text-xs">
         {sources.map((s, i) => {
           const external = /^https?:\/\//.test(s.url);
@@ -28,6 +28,6 @@ export function SourcesList({ sources }: { sources: SourcePart[] }) {
           );
         })}
       </ol>
-    </div>
+    </Disclosure>
   );
 }
