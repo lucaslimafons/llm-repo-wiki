@@ -14,6 +14,7 @@ import { WRITE_TOOL_NAMES } from "@/agent/tool-names";
 import type { WikiUIMessage } from "@/agent/tools";
 import { Markdown } from "@/components/markdown/Markdown";
 import { queryKeys } from "@/lib/query-keys";
+import { chatApi } from "./api";
 import { SourcesList } from "./SourcesList";
 import { ToolPart } from "./ToolPart";
 
@@ -117,7 +118,7 @@ export function ChatThread({ chatId, initialMessages }: { chatId: string; initia
           className="min-h-0 flex-1 resize-none rounded-md border border-line bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
         />
         {busy ? (
-          <button type="button" onClick={() => void stop()} title="Stop" className="rounded-md border border-line p-2">
+          <button type="button" onClick={() => void Promise.all([chatApi.stop(chatId), stop()])} title="Stop" className="rounded-md border border-line p-2">
             <Square className="size-4" />
           </button>
         ) : (

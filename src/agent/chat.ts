@@ -28,6 +28,7 @@ import { buildChatInstructions, loadWikiSchema } from "./prompts";
 import { startAgentRun } from "./runs";
 import { dedupeSources } from "./sources";
 import { createWikiTools, WIKI_TOOL_APPROVAL, type SearchToolOutput, type WikiTools } from "./tools";
+import { beginRun, endRun } from "./active-runs";
 
 export const CHAT_MAX_STEPS = 8;
 
@@ -127,8 +128,11 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
       onStepEnd: (step) => run.addStep(step),
     });
 
-    // No abortSignal from the request: a closed tab must not cut the run short (consumeStream below).
+    // Not the request's signal: a closed tab must not cut the run short (consumeStream below).
+    // Only the Stop button cancels, through the per-chat controller.
+    const controller = beginRun(chatId);
     const result = await agent.stream({
+      abortSignal: controller.signal,
       messages: await convertToModelMessages(context.active, { tools }),
       experimental_transform: sourcesTransform(existingSourceIds(messages.at(-1))),
     });
@@ -142,9 +146,12 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
       onError: errorText,
       onStepEnd: ({ responseMessage }) => saveMessages(db, chatId, [responseMessage]),
       onEnd: async ({ responseMessage, outcome }) => {
+        endRun(chatId, controller);
         await saveMessages(db, chatId, [responseMessage]);
         await run.finish(
-          outcome.status === "failed" ? { status: "failed", error: outcome.error } : { status: "succeeded" },
+          outcome.status === "failed"
+            ? { status: "failed", error: outcome.error }
+            : { status: controller.signal.aborted ? "stopped" : "succeeded" },
         );
       },
     });

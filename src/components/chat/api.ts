@@ -18,6 +18,8 @@ export const chatApi = {
   },
   messages: (id: string) =>
     fetch(`/api/chats/${id}`).then((r) => json<{ id: string; title: string | null; messages: WikiUIMessage[] }>(r)),
+  /** 404 just means the run already ended. */
+  stop: (id: string) => fetch(`/api/chats/${id}/stop`, { method: "POST" }).then(() => undefined),
   pageBody: (path: string) =>
     fetch(`/api/chat/page?${new URLSearchParams({ path })}`).then((r) => json<{ path: string; bodyMd: string; revisionId: string | null }>(r)),
 };

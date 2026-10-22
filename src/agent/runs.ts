@@ -17,7 +17,7 @@ export type AgentRun = {
   /** Adds one step's tokens and cost. Increments in SQL, so concurrent steps never lose an update. */
   addStep(step: StepUsage): Promise<void>;
   totals(): { inputTokens: number; outputTokens: number; costUsd: number };
-  finish(result: { status: "succeeded" | "failed" | "budget_exceeded"; error?: unknown }): Promise<void>;
+  finish(result: { status: "succeeded" | "failed" | "budget_exceeded" | "stopped"; error?: unknown }): Promise<void>;
 };
 
 export async function startAgentRun(db: Db, input: { kind: AgentRunKind; model: string }): Promise<AgentRun> {
