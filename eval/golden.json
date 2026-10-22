@@ -1,0 +1,27 @@
+{
+  "repo": "pmndrs/zustand",
+  "sha": "382d29c485e67018c06e75ec7235130d0968522c",
+  "note": "A hit counts as relevant when its path is one of `expected`. Paths verified against the tarball at `sha`.",
+  "questions": [
+    { "q": "How does the vanilla store notify listeners when state changes?", "expected": ["src/vanilla.ts"] },
+    { "q": "Which React API does the hook use to subscribe to the store?", "expected": ["src/react.ts", "src/traditional.ts"] },
+    { "q": "How do I use a custom equality function instead of Object.is?", "expected": ["src/traditional.ts", "docs/reference/apis/create-with-equality-fn.md", "docs/reference/hooks/use-store-with-equality-fn.md"] },
+    { "q": "How does shallow comparison of objects, Maps and Sets work?", "expected": ["src/vanilla/shallow.ts", "docs/reference/apis/shallow.md"] },
+    { "q": "How do I avoid re-renders when selecting several fields at once?", "expected": ["src/react/shallow.ts", "docs/reference/hooks/use-shallow.md", "docs/learn/guides/prevent-rerenders-with-use-shallow.md"] },
+    { "q": "How is state saved to localStorage and restored on load?", "expected": ["src/middleware/persist.ts", "docs/reference/middlewares/persist.md", "docs/reference/integrations/persisting-store-data.md"] },
+    { "q": "How do I persist only part of the state?", "expected": ["src/middleware/persist.ts", "docs/reference/middlewares/persist.md", "docs/reference/integrations/persisting-store-data.md"] },
+    { "q": "How do I migrate persisted state when the version changes?", "expected": ["src/middleware/persist.ts", "docs/reference/middlewares/persist.md", "docs/reference/integrations/persisting-store-data.md"] },
+    { "q": "How can I delay hydration of a persisted store until I trigger it?", "expected": ["src/middleware/persist.ts", "docs/reference/middlewares/persist.md", "docs/reference/integrations/persisting-store-data.md"] },
+    { "q": "How does the store connect to the Redux DevTools browser extension?", "expected": ["src/middleware/devtools.ts", "docs/reference/middlewares/devtools.md"] },
+    { "q": "How do I write mutable-style updates with Immer?", "expected": ["src/middleware/immer.ts", "docs/reference/middlewares/immer.md", "docs/reference/integrations/immer-middleware.md"] },
+    { "q": "How do I subscribe to a slice of state outside React and get previous values?", "expected": ["src/middleware/subscribeWithSelector.ts", "docs/reference/middlewares/subscribe-with-selector.md"] },
+    { "q": "How do I use a reducer and dispatch actions like Redux?", "expected": ["src/middleware/redux.ts", "docs/reference/middlewares/redux.md", "docs/learn/guides/flux-inspired-practice.md"] },
+    { "q": "How do I infer the store type by combining initial state and actions?", "expected": ["src/middleware/combine.ts", "docs/reference/middlewares/combine.md"] },
+    { "q": "How do I reset the store back to its initial state?", "expected": ["docs/learn/guides/how-to-reset-state.md", "src/vanilla.ts"] },
+    { "q": "How do I split a large store into smaller slices?", "expected": ["docs/learn/guides/slices-pattern.md"] },
+    { "q": "How should I use zustand with Next.js and server-side rendering?", "expected": ["docs/learn/guides/nextjs.md", "docs/learn/guides/ssr-and-hydration.md"] },
+    { "q": "How do I mock stores when testing components?", "expected": ["docs/learn/guides/testing.md"] },
+    { "q": "What changed when migrating to version 5?", "expected": ["docs/reference/migrations/migrating-to-v5.md"] },
+    { "q": "How do I create a store without React?", "expected": ["src/vanilla.ts", "docs/reference/apis/create-store.md"] }
+  ]
+}
