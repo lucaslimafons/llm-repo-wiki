@@ -1,32 +1,39 @@
 # Choosing models
 
-The app uses two models, both through OpenRouter and both set in `.env.local`.
+The app uses two models, both through OpenRouter and both set in `.env.local`. The defaults come
+from live evals on 2026-10-22 against `pmndrs/zustand@382d29c`; the full write-up (method,
+charts, failure modes) is in the eval report. Reproduce with `pnpm eval`,
+`pnpm bench:chat <models…>` and `pnpm bench:author <model> <owner/name> --wipe`.
 
-| Role | Variable | What it does | What matters |
+| Role | Variable | Default | Why |
 |---|---|---|---|
-| Chat | `CHAT_MODEL` | Answers you live; searches, reads and edits pages through tools | Tool-calling reliability, latency |
-| Author | `AUTHOR_MODEL` | Writes and updates pages in the background after each sync | Price per input token (it reads a lot), structured output, citing accurately |
+| Chat | `CHAT_MODEL` | `anthropic/claude-haiku-5.5` | 6/6 answers cited the right file, at $0.003 per answer and 9.9 s, the fastest of six models |
+| Author | `AUTHOR_MODEL` | `anthropic/claude-haiku-5.5` | The only model that wrote a full wiki: 24/24 pages, 276 citations, 0 invented, $0.09 |
 
-## Snapshot (2026-10-22)
+## Chat (6 golden questions, real agent)
 
-τ²-Bench Airline is [OpenRouter's multi-step tool-calling benchmark](https://openrouter.ai/benchmarks/tau2-bench-airline).
-Prices are USD per million tokens and come from the OpenRouter models API.
+| Model | Grounded | $/answer | s/answer |
+|---|---|---|---|
+| `anthropic/claude-haiku-5.5` | 6/6 | 0.0031 | 9.9 |
+| `deepseek/deepseek-v4.1-flash-1017` | 6/6 | 0.0040 | 14.7 |
+| `anthropic/claude-sonnet-5.5` | 6/6 | 0.0683 | 14.5 |
+| `google/gemini-3.7-flash` | 4/6, 1 timeout | 0.0303 | 42.3 |
+| `z-ai/glm-5.3-flash` | 3/6 | 0.0014 | 20.7 |
+| `openai/gpt-5.6-luna` | 3/6 | 0.0016 | 14.9 |
 
-| Model | τ²-Bench | $/task | In / out | Notes |
+## Author (full wiki for zustand)
+
+| Model | Pages written | Citations / invented | Cost | Time |
 |---|---|---|---|---|
-| `anthropic/claude-sonnet-5.5` | 78.7% | 0.16 | 2.00 / 10.00 | Best quality; ~15× Haiku per task |
-| `google/gemini-3.7-flash` | 78.3% | 0.15 | 0.75 / 3.75 | |
-| `z-ai/glm-5.3` | 77.5% | 0.061 | 0.70 / 2.20 | |
-| `deepseek/deepseek-v4.1-flash-1017` | 76.7% | 0.021 | 0.15 / 0.60 | Chat alternative |
-| **`anthropic/claude-haiku-5.5`** | 76.0% | 0.011 | 0.10 / 0.50 | **Default chat** |
-| `z-ai/glm-5.3-flash` | 75.9% | 0.007 | 0.005 / 0.20 | Very cheap, new |
-| **`deepseek/deepseek-v4-flash-0731`** | 73.9% | 0.009 | 0.044 / 0.133 | **Default author**; cache reads 0.001 |
-| `moonshotai/kimi-k2.6` | 74.1% | 0.069 | 0.65 / 3.41 | |
-| `openai/gpt-5.6-luna` | 70.0% | 0.011 | 0.20 / 1.20 | |
+| `anthropic/claude-haiku-5.5` | 24 of 24 | 276 / 0 | $0.091 | 9.6 min |
+| `z-ai/glm-5.3-flash` | 1 of 26 (timeouts, uncited drafts) | 14 / 1 | $0.015 | 13 min |
+| `deepseek/deepseek-v4.1-flash-1017` | 1 of 27 (outline copied the file tree) | 20 / 0 | $0.020 | 1.8 min |
+| `deepseek/deepseek-v4-flash-0731` | 0 (reasoning ran to the token cap) | n/a | n/a | n/a |
 
-τ²-Bench measures tool use in a customer-support simulation. It does not measure how well a
-model writes docs or how faithfully it cites, so measure that on your own repos. Every run's
-real cost lands in `agent_runs.cost_usd`.
+## Retrieval (20 golden questions)
+
+Hybrid search + `cohere/rerank-4-pro` reached recall@5 0.95 (vector-only 0.85, hybrid RRF 0.80)
+for $0.0025 and ~0.65 s extra per search. The reranker is measured but not on by default yet.
 
 ## Privacy
 

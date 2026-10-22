@@ -19,7 +19,8 @@
     "eval": "tsx --env-file=.env.local eval/run.ts",
     "export": "tsx --env-file=.env.local src/export/cli.ts",
     "repo:add": "tsx --env-file=.env.local scripts/add-repo.ts",
-    "bench:author": "tsx --env-file=.env.local scripts/bench-author.ts"
+    "bench:author": "tsx --env-file=.env.local scripts/bench-author.ts",
+    "bench:chat": "tsx --env-file=.env.local scripts/bench-chat.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.152",

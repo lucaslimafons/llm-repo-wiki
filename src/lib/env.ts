@@ -6,7 +6,7 @@ const envSchema = z.object({
   GITHUB_TOKEN: z.string().optional().transform((v) => v || undefined),
   GITHUB_WEBHOOK_SECRET: z.string().optional().transform((v) => v || undefined),
   CHAT_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
-  AUTHOR_MODEL: z.string().default("deepseek/deepseek-v4-flash-0731"),
+  AUTHOR_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
   EMBEDDING_MODEL: z.string().default("openai/text-embedding-3-small"),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(5),
 });
