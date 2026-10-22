@@ -1,0 +1,178 @@
+import { eq } from "drizzle-orm";
+import { MockLanguageModelV4 } from "ai/test";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { SearchHit } from "@/core/contracts";
+import { agentRuns, repos, wikiLog } from "@/db/schema";
+import { resetDb, testDb } from "@/test/db";
+import { collectCitations, runAuthorJob, type AuthorDeps } from "./author";
+import { createFakeStore } from "./testing/fake-store";
+import { usage } from "./testing/mock-model";
+
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const cite = (path: string) => `source:acme/api/${path}#L1-L20@${SHA}`;
+
+const hit: SearchHit = {
+  kind: "source",
+  chunkId: "c",
+  repo: "acme/api",
+  path: "src/server.ts",
+  startLine: 1,
+  endLine: 20,
+  commitSha: SHA,
+  symbol: null,
+  content: "export function serve() {}",
+  score: 1,
+};
+
+/**
+ * Plays an author model: the first call of each conversation searches, the call after the tool
+ * result answers with JSON (the outline, or a page draft from `drafts`).
+ */
+function authorModel(outline: string[], drafts: (title: string) => { bodyMd: string; citations: string[] }) {
+  let n = 0;
+  return new MockLanguageModelV4({
+    modelId: "mock-author",
+    doGenerate: async ({ prompt }) => {
+      const last = prompt.at(-1)!;
+      const firstUser = JSON.stringify(prompt.find((m) => m.role === "user"));
+      const base = { finishReason: { unified: "stop" as const, raw: undefined }, usage: usage(100, 50), providerMetadata: { openrouter: { usage: { cost: 0.002 } } }, warnings: [] };
+      if (last.role !== "tool") {
+        return { ...base, finishReason: { unified: "tool-calls" as const, raw: undefined }, content: [{ type: "tool-call" as const, toolCallId: `c${++n}`, toolName: "searchKnowledge", input: JSON.stringify({ query: "how", scope: "source" }) }] };
+      }
+      if (firstUser.includes("OUTLINE")) {
+        const pages = outline.map((path) => ({ path, purpose: `About ${path}`, queries: ["q"] }));
+        return { ...base, content: [{ type: "text" as const, text: JSON.stringify({ pages }) }] };
+      }
+      const title = /wiki page \\"([^"\\]+)\\"/.exec(firstUser)?.[1] ?? "?";
+      return { ...base, content: [{ type: "text" as const, text: JSON.stringify(drafts(title)) }] };
+    },
+  });
+}
+
+let repoId: string;
+const searches: unknown[] = [];
+
+function deps(model: MockLanguageModelV4, fake = createFakeStore(), extra: Partial<AuthorDeps> = {}) {
+  const d: AuthorDeps = {
+    db: testDb(),
+    store: fake.store,
+    search: async (input) => (searches.push(input), [hit]),
+    model,
+    loadSchema: async () => "# schema",
+    ...extra,
+  };
+  return { d, fake };
+}
+
+const goodDraft = (title: string) => ({
+  bodyMd: `# ${title}\n\nServes HTTP [src/server.ts#L1-L20](${cite("src/server.ts")}).`,
+  citations: [cite("src/server.ts")],
+});
+
+beforeEach(async () => {
+  await resetDb();
+  searches.length = 0;
+  const [repo] = await testDb().insert(repos).values({ owner: "acme", name: "api" }).returning();
+  repoId = repo.id;
+});
+
+describe("author-wiki: first run", () => {
+  const outline = ["Overview", "Architecture", "Architecture/Server", "Glossary", "../evil", "Guides"];
+  const drafts = (title: string) => (title === "Glossary" ? { bodyMd: "# Glossary\n\nUncited claims.", citations: [] } : goodDraft(title));
+
+  it("proposes cited pages under the page budget and drops uncited or invalid ones", async () => {
+    const model = authorModel(outline, drafts);
+    const { d, fake } = deps(model, undefined, { maxPages: 4 });
+    const result = await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+
+    expect(result.mode).toBe("initial");
+    expect(result.proposed).toEqual(["Overview", "Architecture", "Architecture/Server"]);
+    expect(result.dropped).toEqual([
+      { path: "Glossary", reason: "the draft cited no sources" },
+      { path: "../evil", reason: "invalid path" },
+      { path: "Guides", reason: "page budget of 4 reached" },
+    ]);
+
+    const writes = fake.writes();
+    expect(writes.map((w) => w.method)).toEqual(["createPage", "createPage", "createPage"]);
+    const [run] = await testDb().select().from(agentRuns);
+    for (const w of writes) {
+      expect(w.input).toMatchObject({ mode: "propose", author: { kind: "agent", agentRunId: run.id } });
+      expect((w.input as { citations: unknown[] }).citations.length).toBeGreaterThan(0);
+    }
+    // The child landed under its (proposed) parent.
+    const server = await fake.store.getPage({ path: "Architecture/Server" });
+    expect(server?.parentId).toBe((await fake.store.getPage({ path: "Architecture" }))?.id);
+    // Evidence came from this repo's sources only.
+    expect(searches.every((s) => (s as { scope: string; repo: string }).scope === "source" && (s as { repo: string }).repo === "acme/api")).toBe(true);
+  });
+
+  it("records the run's tokens and cost from provider metadata, and logs to wiki_log", async () => {
+    const model = authorModel(outline, drafts);
+    const { d } = deps(model, undefined, { maxPages: 4 });
+    await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+
+    const calls = model.doGenerateCalls.length;
+    const [run] = await testDb().select().from(agentRuns);
+    expect(run).toMatchObject({ kind: "author", status: "succeeded", inputTokens: 100 * calls, outputTokens: 50 * calls });
+    expect(Number(run.costUsd)).toBeCloseTo(0.002 * calls, 6);
+
+    const logs = await testDb().select().from(wikiLog).where(eq(wikiLog.repoId, repoId));
+    const actions = logs.map((l) => l.action);
+    expect(actions.filter((a) => a === "author.page_proposed")).toHaveLength(3);
+    expect(actions).toContain("author.started");
+    expect(actions).toContain("author.finished");
+    expect(logs.find((l) => l.action === "author.page_dropped" && l.details?.path === "Glossary")?.details?.reason).toBe("the draft cited no sources");
+  });
+
+  it("a retried job doesn't duplicate proposals", async () => {
+    const fake = createFakeStore();
+    await runAuthorJob(deps(authorModel(outline, drafts), fake, { maxPages: 4 }).d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+    const before = fake.writes().length;
+    const again = await runAuthorJob(deps(authorModel(outline, drafts), fake, { maxPages: 4 }).d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+    expect(fake.writes()).toHaveLength(before);
+    expect(again.skipped.map((s) => s.path)).toEqual(["Overview", "Architecture", "Architecture/Server"]);
+  });
+
+  it("stops proposing once the token budget is spent", async () => {
+    const { d, fake } = deps(authorModel(outline, drafts), undefined, { tokenBudget: 400 });
+    const result = await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+    expect(result.status).toBe("budget_exceeded");
+    expect(fake.writes().length).toBeLessThan(3);
+    const [run] = await testDb().select().from(agentRuns);
+    expect(run.status).toBe("budget_exceeded");
+  });
+});
+
+describe("author-wiki: incremental run", () => {
+  it("re-proposes only pages citing changed files (or stale), never deletes or moves", async () => {
+    const fake = createFakeStore();
+    const c = (path: string, repo = "acme/api") => ({ repo, path, commitSha: SHA, startLine: 1, endLine: 20 });
+    fake.seed("Architecture/Server", "# Server", [c("src/server.ts")]);
+    fake.seed("Guides/Setup", "# Setup", [c("README.md")]);
+    fake.seed("Overview", "# Overview", [c("src/db.ts")], { stale: true });
+    fake.seed("Web", "# Web", [c("src/app.ts", "acme/web")], { stale: true });
+
+    const model = authorModel([], goodDraft);
+    const payload = { repoId, fromSha: "1111111", toSha: SHA, changedPaths: ["src/server.ts"] };
+    const result = await runAuthorJob(deps(model, fake).d, payload);
+
+    expect(result.mode).toBe("incremental");
+    expect(result.proposed.sort()).toEqual(["Architecture/Server", "Overview"]);
+    const writes = fake.writes();
+    expect(writes.every((w) => w.method === "updatePage")).toBe(true);
+    expect(writes.every((w) => (w.input as { mode: string }).mode === "propose")).toBe(true);
+
+    const rerun = await runAuthorJob(deps(authorModel([], goodDraft), fake).d, payload);
+    expect(rerun.proposed).toEqual([]);
+    expect(rerun.skipped.map((s) => s.reason)).toEqual(["already proposed for this sha", "already proposed for this sha"]);
+    expect(fake.writes()).toHaveLength(writes.length);
+  });
+});
+
+describe("collectCitations", () => {
+  it("merges body links with the returned list, dedupes, and keeps only this repo", () => {
+    const body = `a [x](${cite("a.ts")}) b [y](${cite("a.ts")}) c [z](source:other/repo/b.ts#L1@${SHA})`;
+    expect(collectCitations("acme/api", body, [cite("b.ts"), "garbage"]).map((c) => c.path)).toEqual(["b.ts", "a.ts"]);
+  });
+});
