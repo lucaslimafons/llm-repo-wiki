@@ -86,7 +86,7 @@ credits. Give it a dedicated key with a spending limit.
 git clone https://github.com/lucaslimafons/llm-repo-wiki && cd llm-repo-wiki
 cp .env.example .env.local        # add OPENROUTER_API_KEY
 pnpm install
-pnpm setup                        # Postgres 18 + pgvector in Docker, then migrations
+pnpm db:setup                     # Postgres 18 + pgvector in Docker, then migrations
 pnpm dev                          # http://localhost:3000
 pnpm worker                       # second terminal: sync + author jobs
 pnpm repo:add pmndrs/zustand      # or use the "Add repository" box in the sidebar
@@ -95,11 +95,37 @@ pnpm repo:add pmndrs/zustand      # or use the "Add repository" box in the sideb
 The first sync takes a few seconds; the first wiki, about 10 minutes and about $0.10. Review the
 pages under **Proposals**.
 
+## Private repositories
+
+Public repos work without a token. For private ones, give the worker read-only access:
+
+1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new).
+   Set **Resource owner** to you or the organization, **Repository access** to *Only select
+   repositories*, and **Repository permissions → Contents** to *Read-only*. GitHub adds
+   Metadata (read-only) itself. Nothing else is needed. An organization may have to approve the
+   token before it works.
+2. Add it to `.env.local` as `GITHUB_TOKEN=github_pat_...`.
+3. Restart `pnpm worker` and `pnpm dev`, because both read the environment at start.
+4. Add each repo with `pnpm repo:add owner/name`, or the sidebar's **Add repository** box.
+
+What leaves your machine, and what doesn't:
+
+- **Sent to OpenRouter:** chunks of code for embeddings (`openai/text-embedding-3-small` by
+  default), and retrieved chunks for page writing and chat (`anthropic/claude-haiku-5.5` by
+  default). For private code, restrict OpenRouter to providers that don't train on or retain
+  prompts, in its privacy settings.
+- **Never sent to a model:** the GitHub token, and any file the secret scanner flags. A file with a
+  key-shaped string is dropped whole before it is chunked or embedded.
+- **Stored locally only:** everything else, in the Postgres container on `127.0.0.1`.
+
+To start over with different repos: `pnpm db:reset` (this deletes all repos, pages and chats).
+
 ## Scripts
 
 | Command | What it does |
 |---|---|
-| `pnpm setup` | Start Postgres in Docker and run migrations |
+| `pnpm db:setup` | Start Postgres in Docker and run migrations |
+| `pnpm db:reset` | **Delete all data** (repos, wiki, chats) and start from an empty schema |
 | `pnpm dev` / `pnpm worker` | Web app / background job worker |
 | `pnpm repo:add owner/name` | Add a repo and queue its first sync |
 | `pnpm export --out <dir>` | Write the wiki as an Azure DevOps folder |

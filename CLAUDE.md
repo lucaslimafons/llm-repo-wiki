@@ -10,7 +10,8 @@ The plan and the reasoning live in `docs/plan.md`. How the agent writes pages li
 ## Commands
 
 ```bash
-pnpm setup        # postgres (pgvector) in docker + migrations
+pnpm db:setup     # postgres (pgvector) in docker + migrations (not `pnpm setup`: that is a pnpm built-in)
+pnpm db:reset     # 🔴 deletes ALL data (volume) and recreates an empty schema
 pnpm dev          # next dev
 pnpm worker       # pg-boss job consumer (separate process, run beside dev)
 pnpm test         # vitest against a real postgres (TEST_DB_NAME picks the database)
