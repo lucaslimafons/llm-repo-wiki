@@ -7,6 +7,7 @@ import { repoFullNameSchema } from "@/github/repo-name";
 import { createOpenRouterEmbedder, toVector, type Embedder } from "@/ingest/embedder";
 import { env, openRouterKey } from "@/lib/env";
 import { pagePaths } from "./page-path";
+import { providerPrivacy } from "@/lib/openrouter-privacy";
 
 export const RRF_K = 60;
 /** Candidates per retriever before fusion. */
@@ -30,7 +31,7 @@ let defaults: SearchDeps | undefined;
 function defaultDeps(): SearchDeps {
   defaults ??= {
     db: defaultDb(),
-    embedder: createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL }),
+    embedder: createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL, ...providerPrivacy() }),
   };
   return defaults;
 }

@@ -2,6 +2,7 @@ import { hkdfSync } from "node:crypto";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 import { env, openRouterKey } from "@/lib/env";
+import { providerPrivacy } from "@/lib/openrouter-privacy";
 
 let provider: ReturnType<typeof createOpenRouter> | undefined;
 
@@ -14,11 +15,11 @@ function openrouter() {
 const accounting = { usage: { include: true } } as const;
 
 export function chatModel(): LanguageModel {
-  return openrouter().chat(env().CHAT_MODEL, accounting);
+  return openrouter().chat(env().CHAT_MODEL, { ...accounting, ...providerPrivacy() });
 }
 
 export function authorModel(): LanguageModel {
-  return openrouter().chat(env().AUTHOR_MODEL, accounting);
+  return openrouter().chat(env().AUTHOR_MODEL, { ...accounting, ...providerPrivacy() });
 }
 
 /** The id recorded in agent_runs.model for any model instance (real or mock). */

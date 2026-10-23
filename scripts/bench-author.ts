@@ -6,6 +6,7 @@ import { repos } from "@/db/schema";
 import { parseRepoFullName } from "@/github/repo-name";
 import { getBoss } from "@/jobs/queue";
 import { openRouterKey } from "@/lib/env";
+import { providerPrivacy } from "@/lib/openrouter-privacy";
 import { searchKnowledge } from "@/search";
 import { wikiStore } from "@/wiki/store";
 
@@ -26,7 +27,7 @@ await db().execute(sql`delete from pages`);
 const t0 = Date.now();
 try {
   const result = await runAuthorJob(
-    { db: db(), store: wikiStore, search: searchKnowledge, model: createOpenRouter({ apiKey: openRouterKey() })(model, { usage: { include: true } }) },
+    { db: db(), store: wikiStore, search: searchKnowledge, model: createOpenRouter({ apiKey: openRouterKey() })(model, { usage: { include: true }, ...providerPrivacy() }) },
     { repoId: repo.id, fromSha: null, toSha: repo.syncedSha, changedPaths: [] },
   );
   const [stats] = await db().execute<{ cost: string; input: number; output: number; cited: number; ungrounded: number }>(sql`

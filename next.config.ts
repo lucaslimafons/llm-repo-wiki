@@ -2,8 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
-  // Local-only app: opening it as 127.0.0.1 instead of localhost must still hydrate.
-  allowedDevOrigins: ["127.0.0.1"],
+  // The server binds 127.0.0.1; either local address must still hydrate.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   partialPrefetching: true,
   turbopack: {
     rules: {

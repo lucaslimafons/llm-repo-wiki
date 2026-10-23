@@ -5,6 +5,7 @@ import { enqueueRepoSync } from "@/jobs/queue";
 import { env, openRouterKey } from "@/lib/env";
 import { createOpenRouterEmbedder, type Embedder } from "./embedder";
 import type { RepoDeps } from "./repos";
+import { providerPrivacy } from "@/lib/openrouter-privacy";
 
 let github: GitHubClient | undefined;
 let embedder: Embedder | undefined;
@@ -15,7 +16,7 @@ export function prodGitHub(): GitHubClient {
 }
 
 export function prodEmbedder(): Embedder {
-  embedder ??= createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL });
+  embedder ??= createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL, ...providerPrivacy() });
   return embedder;
 }
 
