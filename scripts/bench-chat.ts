@@ -9,6 +9,7 @@ import { createWikiTools } from "@/agent/tools";
 import { db } from "@/db/client";
 import { getBoss } from "@/jobs/queue";
 import { openRouterKey } from "@/lib/env";
+import { providerPrivacy } from "@/lib/openrouter-privacy";
 import { parseSourceHref } from "@/lib/source-links";
 import { searchKnowledge } from "@/search";
 import { wikiStore } from "@/wiki/store";
@@ -30,7 +31,7 @@ const tools = createWikiTools({ store: wikiStore, search: searchKnowledge, autho
 
 for (const model of models) {
   const agent = new ToolLoopAgent({
-    model: openrouter(model, { usage: { include: true } }),
+    model: openrouter(model, { usage: { include: true }, ...providerPrivacy() }),
     instructions,
     tools,
     stopWhen: isStepCount(CHAT_MAX_STEPS),

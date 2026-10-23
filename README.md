@@ -112,11 +112,17 @@ What leaves your machine, and what doesn't:
 
 - **Sent to OpenRouter:** chunks of code for embeddings (`openai/text-embedding-3-small` by
   default), and retrieved chunks for page writing and chat (`anthropic/claude-haiku-5.5` by
-  default). For private code, restrict OpenRouter to providers that don't train on or retain
-  prompts, in its privacy settings.
+  default). Every request asks for **zero data retention** (`OPENROUTER_ZDR=true`, the default):
+  OpenRouter routes it only to endpoints that don't store prompts (Vertex/Bedrock for Claude, Azure
+  for OpenAI), and a model without one fails instead of falling back.
+- **Also set in the OpenRouter dashboard (Settings → Privacy):** Zero Data Retention on for every
+  provider you use, *and* "All other models", so a model you switch to later is covered too. Keep
+  training on your inputs disabled, and keep prompt logging and any observability or broadcast
+  integrations off.
 - **Never sent to a model:** the GitHub token, and any file the secret scanner flags. A file with a
   key-shaped string is dropped whole before it is chunked or embedded.
-- **Stored locally only:** everything else, in the Postgres container on `127.0.0.1`.
+- **Stored locally only:** everything else, in the Postgres container on `127.0.0.1`. The web app
+  binds to `127.0.0.1` too, because it has no login: nothing on your network can reach it.
 
 To start over with different repos: `pnpm db:reset` (this deletes all repos, pages and chats).
 

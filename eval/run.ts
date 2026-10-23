@@ -17,6 +17,7 @@ import { env, openRouterKey } from "@/lib/env";
 import type { SearchHit } from "@/core/contracts";
 import { searchWithMode, type FusionWeights, type SearchMode } from "@/search";
 import { rerankHits } from "@/search/rerank";
+import { providerPrivacy } from "@/lib/openrouter-privacy";
 
 const goldenSchema = z.object({
   repo: z.string(),
@@ -47,7 +48,7 @@ async function main() {
   const ref = parseRepoFullName(golden.repo);
   const database = db();
   const github = createGitHubClient({ token: env().GITHUB_TOKEN });
-  const embedder = createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL });
+  const embedder = createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL, ...providerPrivacy() });
 
   // Pin the repo to the golden commit so the expected paths are guaranteed to exist.
   let [repo] = await database.select().from(repos).where(and(eq(repos.owner, ref.owner), eq(repos.name, ref.name)));
@@ -86,7 +87,7 @@ async function main() {
         st.weights,
       );
       if (st.rerank) {
-        const out = await rerankHits(hits, q, { apiKey: openRouterKey(), model: st.rerank, topN: K_MRR });
+        const out = await rerankHits(hits, q, { apiKey: openRouterKey(), model: st.rerank, topN: K_MRR, ...providerPrivacy() });
         hits = out.hits;
         cost += out.costUsd;
       }

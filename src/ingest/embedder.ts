@@ -14,9 +14,15 @@ export const EMBED_BATCH = 64;
  * OpenRouter via the AI SDK. A 429/5xx surfaces as a thrown APICallError after the SDK's own
  * retries, which fails the job so pg-boss retries it with backoff. Never catch it here.
  */
-export function createOpenRouterEmbedder(opts: { apiKey: string; model: string; batchSize?: number }): Embedder {
+export function createOpenRouterEmbedder(opts: {
+  apiKey: string;
+  model: string;
+  batchSize?: number;
+  /** Routing preferences, e.g. providerPrivacy(). */
+  provider?: { zdr?: boolean; data_collection?: "allow" | "deny" };
+}): Embedder {
   const provider = createOpenRouter({ apiKey: opts.apiKey });
-  const model = provider.textEmbeddingModel(opts.model);
+  const model = provider.textEmbeddingModel(opts.model, opts.provider ? { provider: opts.provider } : undefined);
   const batchSize = opts.batchSize ?? EMBED_BATCH;
   return {
     model: opts.model,

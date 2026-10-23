@@ -8,6 +8,8 @@ const envSchema = z.object({
   CHAT_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
   AUTHOR_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
   EMBEDDING_MODEL: z.string().default("openai/text-embedding-3-small"),
+  /** Route every model call to zero-data-retention endpoints (see src/lib/openrouter-privacy.ts). */
+  OPENROUTER_ZDR: z.stringbool().default(true),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(5),
 });
 
