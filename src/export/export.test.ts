@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -30,8 +30,8 @@ beforeEach(async () => {
   await testDb().insert(repos).values({ owner: "acme", name: "api" });
 });
 
-describe("Azure DevOps export", () => {
-  it("writes Page.md beside Page/, .order files and rewritten links", async () => {
+describe("markdown export", () => {
+  it("writes leaf pages as slug.md, parents as slug/README.md, and a root index", async () => {
     const overview = await create("Overview", null, "Start here.");
     const arch = await create("Architecture", null, "See [Overview](wiki:" + overview + ").");
     const ingest = await create("Ingest-pipeline v2", arch, "");
@@ -55,11 +55,20 @@ describe("Azure DevOps export", () => {
 
     const files = buildExport(await loadExportPages(testDb()));
     expect(Object.fromEntries(files)).toEqual({
-      ".order": "Overview\nArchitecture\n",
-      "Architecture.md": "See [Overview](/Overview).\n",
-      "Architecture/.order": "Ingest%2Dpipeline-v2\n",
-      "Architecture/Ingest%2Dpipeline-v2.md": [
-        "Back to [arch](/Architecture).",
+      "README.md": [
+        "# Wiki",
+        "",
+        "- [Overview](./overview.md)",
+        "- [Architecture](./architecture/README.md)",
+        "  - [Ingest-pipeline v2](./architecture/ingest-pipeline-v2.md)",
+        "",
+      ].join("\n"),
+      "overview.md": "# Overview\n\nStart here.\n",
+      "architecture/README.md": "# Architecture\n\nSee [Overview](../overview.md).\n",
+      "architecture/ingest-pipeline-v2.md": [
+        "# Ingest-pipeline v2",
+        "",
+        "Back to [arch](./README.md).",
         "Reads [index.ts#L3-L9](https://github.com/acme/api/blob/abc1234/src/index.ts#L3-L9).",
         "Gone: old.",
         "```md",
@@ -67,24 +76,30 @@ describe("Azure DevOps export", () => {
         "```",
         "",
       ].join("\n"),
-      "Overview.md": "Start here.\n",
     });
   });
 
-  it("is deterministic on disk and creates .attachments/", async () => {
+  it("keeps a body's own title, and never lets a page take the folder's README.md", async () => {
+    const parent = await create("Guides", null, "# Guides, the long version\n\nIntro.");
+    await create("README", parent, "x");
+    const files = buildExport(await loadExportPages(testDb()));
+    expect(files.get("guides/README.md")).toBe("# Guides, the long version\n\nIntro.\n");
+    expect(files.get("guides/readme-2.md")).toBe("# README\n\nx\n");
+  });
+
+  it("is deterministic on disk and refuses to overwrite without --force", async () => {
     const a = await create("A", null, "a");
     await create("B c", a, "b");
-    const [one, two] = [await mkdtemp(join(tmpdir(), "ado-")), await mkdtemp(join(tmpdir(), "ado-"))];
+    const [one, two] = [await mkdtemp(join(tmpdir(), "wiki-")), await mkdtemp(join(tmpdir(), "wiki-"))];
     await exportWiki(testDb(), one);
     await exportWiki(testDb(), two);
     const names = await listFiles(one);
-    expect(names).toEqual([".attachments/", ".order", "A/", "A/.order", "A/B-c.md", "A.md"]);
+    expect([...names].sort()).toEqual(["README.md", "a/", "a/README.md", "a/b-c.md"]);
     expect(await listFiles(two)).toEqual(names);
     for (const n of names.filter((x) => !x.endsWith("/"))) {
       expect(await readFile(join(two, n))).toEqual(await readFile(join(one, n)));
     }
-    expect((await stat(join(one, ".attachments"))).isDirectory()).toBe(true);
     await expect(exportWiki(testDb(), one)).rejects.toThrow(/--force/);
-    await expect(exportWiki(testDb(), one, { force: true })).resolves.toEqual({ files: 4 });
+    await expect(exportWiki(testDb(), one, { force: true })).resolves.toEqual({ files: 3 });
   });
 });

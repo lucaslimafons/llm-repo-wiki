@@ -101,14 +101,14 @@ export const chunks = pgTable(
   ],
 );
 
-// ── Compiled layer: the wiki (Azure DevOps model: a folder is a page with children) ──
+// ── Compiled layer: the wiki (a page tree: a folder is a page with children) ──
 
 export const pages = pgTable(
   "pages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     parentId: uuid("parent_id").references((): AnyPgColumn => pages.id, { onDelete: "restrict" }),
-    /** Display title. Encoded to an ADO filename only on export. */
+    /** Display title. Slugged to a filename only on export. */
     title: text("title").notNull(),
     sortKey: integer("sort_key").notNull().default(0),
     currentRevisionId: uuid("current_revision_id").references(

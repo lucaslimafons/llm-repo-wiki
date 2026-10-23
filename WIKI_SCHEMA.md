@@ -9,7 +9,7 @@ system prompt, so edit it to change how the wiki is written.
 - **Wiki:** these pages. Owned by the agent and reviewed by a human.
 - **This schema:** the conventions below.
 
-## Structure (Azure DevOps wiki model)
+## Structure (a page tree: any page can have subpages)
 
 A folder is a page that has children. Keep the top level small and stable:
 

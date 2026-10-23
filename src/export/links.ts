@@ -6,7 +6,7 @@ const FENCE_RE = /^\s{0,3}(```|~~~)/;
 /**
  * Rewrites inline `wiki:` and `source:` links outside fenced code. A link that cannot be
  * resolved (deleted or unpublished page, malformed citation) keeps its text and loses the link,
- * so the export never ships a URL scheme ADO cannot open.
+ * so the export never ships a link scheme a markdown viewer cannot open.
  */
 export function rewriteLinks(body: string, wikiPath: (pageId: string) => string | undefined): string {
   let fence: string | null = null;
