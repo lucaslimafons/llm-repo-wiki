@@ -1,12 +1,13 @@
 import { z } from "zod";
 
-/** Azure DevOps caps a page's full path; we measure the "Parent/Child" display path. */
+/** Path cap borrowed from Azure DevOps wikis; we measure the "Parent/Child" display path. */
 export const MAX_PAGE_PATH_LENGTH = 235;
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
 /**
- * A page title under Azure DevOps wiki rules. Trimmed first, so " Setup " is stored as "Setup".
+ * A page title under rules borrowed from Azure DevOps wikis, which keep titles safe as file and
+ * path names anywhere. Trimmed first, so " Setup " is stored as "Setup".
  * Sibling uniqueness needs the database, and the full-path cap needs the parent: the store checks both.
  */
 export const pageTitleSchema = z

@@ -6,7 +6,7 @@ A wiki that writes and maintains itself from one or more GitHub repos. It is Kar
 [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) applied to code:
 
 - **Sources:** repo files at a commit. Immutable, chunked, embedded.
-- **Wiki:** markdown pages in the Azure DevOps folder model, written by an agent and reviewed by
+- **Wiki:** markdown pages in a page tree (any page can have subpages), written by an agent and reviewed by
   you.
 - **Schema:** `WIKI_SCHEMA.md` governs how the agent writes.
 
@@ -31,7 +31,7 @@ lives in Postgres.
 | Incremental | Compare API `synced...desired`; re-embed only changed chunk hashes | 🔴 Compare caps at 300 files; above that, do a full hash reconcile |
 | Jobs | pg-boss 12 in the same Postgres, consumed by a separate worker process | No Redis. `stately` + `singletonKey=repoId` means one sync per repo and the latest sha wins. |
 | Trigger | Poll the default-branch head every N minutes, plus a Sync button. Webhook is optional (`gh webhook forward`). | Local-only: GitHub cannot reach localhost. A merged PR is a `push`, so never subscribe to both. |
-| Wiki storage | Postgres is the truth, and Azure DevOps folder/git export is a target | Links are stored as `wiki:<uuid>`, so moves never rewrite bodies. Revisions give history and revert. |
+| Wiki storage | Postgres is the truth; a plain-markdown folder export is a target (it replaced an Azure DevOps layout, whose encoded filenames read badly anywhere else) | Links are stored as `wiki:<uuid>`, so moves never rewrite bodies. Revisions give history and revert. |
 | Writes | Chat with you present: `apply` (an accepted revision), and destructive tools need approval. Background agent: `propose` only. | GitBook's change-request pattern |
 | Chat memory | Every `UIMessage` is stored whole. Reopening a session reloads it server-side. Old turns fold into `chats.summary`. | The client sends only the new message, so context never depends on the browser. |
 | Sources | Every RAG-backed answer shows its sources, linking to GitHub at the exact sha and lines, and they persist with the message | You can always check where an answer came from |
@@ -75,7 +75,7 @@ Owns `src/ingest/**`, `src/search/**`, `src/github/**`, `src/components/repos/**
 Owns `src/wiki/**`, `src/export/**`, `src/components/wiki/**`, `src/components/markdown/**`,
 `src/app/(wiki)/**` except the layout's chat slot.
 
-- **`wikiStore`:** implements the contract, with Azure DevOps title rules (no `/ \ #`, no
+- **`wikiStore`:** implements the contract, with portable title rules borrowed from Azure DevOps (no `/ \ #`, no
   leading/trailing `.`, path ≤ 235). It also writes `wiki_log` on every write and enqueues
   `index-page` on accept.
 - **UI:**
@@ -87,13 +87,13 @@ Owns `src/wiki/**`, `src/export/**`, `src/components/wiki/**`, `src/components/m
   - revision history and revert;
   - proposals queue with a diff and accept/reject;
   - stale badge.
-- **`pnpm export --out <dir>`:** Azure DevOps layout (`Page.md` beside `Page/`, `.order`,
-  encoded filenames, `.attachments/`). `wiki:` links become `/Parent/Child`, and citations become
-  GitHub links.
+- **`pnpm export --out <dir>`:** plain markdown that renders on GitHub: `slug.md` per page,
+  `slug/README.md` for a page with subpages, and a root index. `wiki:` links become relative links,
+  and citations become GitHub permalinks. (An Azure DevOps layout was built first, then replaced.)
 - **`lint-wiki` job (deterministic part):** orphans, dead links, missing citations, citations to
   deleted files.
 - **Done when:** tests cover tree ordering, move cycles refused, delete-with-children refused,
-  propose → accept → current revision, stale marking, filename encoding round-trip and export
+  propose → accept → current revision, stale marking, slug uniqueness and export
   snapshot.
 
 ### Track C: agent (`track/agent`)

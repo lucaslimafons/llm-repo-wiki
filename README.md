@@ -54,8 +54,8 @@ Notable choices:
 - **Stays fresh.** A worker polls each repo's default branch, re-indexes only the changed files,
   marks the pages that cite them as stale, and proposes updates.
 - **Organizes pages as a tree.** Any page can have subpages, as in Notion, Confluence or Azure
-  DevOps wikis. `pnpm export` writes the accepted wiki to a folder of markdown files in the Azure
-  DevOps wiki layout.
+  DevOps wikis. `pnpm export` writes the accepted wiki as plain markdown that renders on GitHub: a
+  `slug.md` per page, a `README.md` for each page with subpages, and a root index.
 
 ## How it works
 
@@ -105,10 +105,10 @@ its pages under **Proposals**.
 | `pnpm db:reset` | **Delete all data** (repos, wiki, chats) and start from an empty schema |
 | `pnpm dev` / `pnpm worker` | Web app / background job worker |
 | `pnpm repo:add owner/name` | Add a repo and queue its first sync |
-| `pnpm export --out <dir>` | Write the accepted wiki as an Azure DevOps wiki folder |
+| `pnpm export --out <dir>` | Write the accepted wiki as a folder of markdown that renders on GitHub |
 | `pnpm eval` | Retrieval eval: 8 search strategies, recall@5 and MRR |
 | `pnpm bench:chat`, `pnpm bench:author` | Compare models on the real chat agent and author job |
-| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 252 tests against a real Postgres, plus checks |
+| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 255 tests against a real Postgres, plus checks |
 
 ## Configuration
 
@@ -288,8 +288,6 @@ large the repo is. Only embedding grows with code size.
 - **Files over 300 KB, binaries, lockfiles and generated code** are skipped.
 - **Citations are grounded, not proven.** A citation is checked to point at retrieved code. Whether
   the sentence says the same thing as that code is not checked.
-- **The Azure DevOps export** follows the documented wiki layout but has not been tested against a
-  real Azure DevOps wiki.
 
 ## Troubleshooting
 

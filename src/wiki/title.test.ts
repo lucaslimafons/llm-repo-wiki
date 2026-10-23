@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pageTitleSchema } from "./title";
 
-describe("pageTitleSchema (Azure DevOps rules)", () => {
+describe("pageTitleSchema", () => {
   it.each([
     ["Getting Started", "Getting Started"],
     ["  Setup  ", "Setup"],

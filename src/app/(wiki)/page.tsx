@@ -6,7 +6,7 @@ import { wikiRoute } from "@/wiki/routes";
 import { Suspense } from "react";
 import { PageFallback } from "@/app/(wiki)/fallback";
 
-/** Wiki home: the first root page (first entry of the root .order), or how to get one. */
+/** Wiki home: the first root page in sort order, or how to get one. */
 async function HomePageContent() {
   await connection();
   const [first] = await wikiStore.listTree();
