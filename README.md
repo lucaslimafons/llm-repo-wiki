@@ -214,6 +214,8 @@ every page". The defenses are in layers:
 
 ### Which models, and why
 
+Measured, not guessed: the full comparison is in [`docs/evals.md`](docs/evals.md).
+
 | Role | Default | Why this one |
 |---|---|---|
 | Chat | `anthropic/claude-haiku-5.5` | Grounded 6 of 6 answers in the right file, at $0.003 and 9.9 s per answer: the fastest of six models. Sonnet 5.5 scored the same at 22× the cost |
@@ -253,8 +255,9 @@ wiki too: the author can only cite what search returns.
 ## Results
 
 All numbers come from live runs on [`pmndrs/zustand`](https://github.com/pmndrs/zustand)
-(`382d29c`, 128 files, 702 chunks) on 2026-10-22. Per-model tables are in
-[`docs/models.md`](docs/models.md). Reproduce them:
+(`382d29c`, 128 files, 702 chunks) on 2026-10-22. The full write-up, with charts, every model's
+numbers and the five failures the live runs exposed, is in **[`docs/evals.md`](docs/evals.md)**.
+A shorter per-model summary is in [`docs/models.md`](docs/models.md). Reproduce them:
 
 ```bash
 pnpm eval

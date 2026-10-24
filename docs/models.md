@@ -2,7 +2,7 @@
 
 The app uses two models, both through OpenRouter and both set in `.env.local`. The defaults come
 from live evals on 2026-10-22 against `pmndrs/zustand@382d29c`; the full write-up (method,
-charts, failure modes) is in the eval report. Reproduce with `pnpm eval`,
+charts, failure modes) is in [`evals.md`](evals.md). Reproduce with `pnpm eval`,
 `pnpm bench:chat <models…>` and `pnpm bench:author <model> <owner/name> --wipe`.
 
 | Role | Variable | Default | Why |
