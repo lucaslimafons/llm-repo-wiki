@@ -22,6 +22,7 @@ import {
   saveMessages,
   truncateAfter,
 } from "./chat-store";
+import { formatProjectContext, getProjectContext } from "@/project/context";
 import { buildContext } from "./context";
 import { modelName } from "./models";
 import { buildChatInstructions, loadWikiSchema } from "./prompts";
@@ -104,7 +105,7 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
     if (merged.truncateAfterId) await truncateAfter(db, chatId, merged.truncateAfterId);
     await saveMessages(db, chatId, merged.dirty);
 
-    const [context, schema, tree] = await Promise.all([
+    const [context, schema, tree, project] = await Promise.all([
       buildContext({
         db,
         chatId,
@@ -116,11 +117,12 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
       }),
       (deps.loadSchema ?? loadWikiSchema)(),
       store.listTree(),
+      getProjectContext(db),
     ]);
 
     const agent = new ToolLoopAgent({
       model: deps.model,
-      instructions: buildChatInstructions({ schema, tree, summary: context.summary }),
+      instructions: buildChatInstructions({ schema, tree, summary: context.summary, project: formatProjectContext(project) }),
       tools,
       stopWhen: isStepCount(CHAT_MAX_STEPS),
       toolApproval: WIKI_TOOL_APPROVAL,

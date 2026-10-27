@@ -124,6 +124,7 @@ at start.
 | `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Must return 1,536 dimensions. Changing it means re-embedding everything (`pnpm db:reset`, then add the repos again) |
 | `OPENROUTER_ZDR` | `true` | Every model call requires a zero-data-retention endpoint. Keep it on for private code |
 | `POLL_INTERVAL_MINUTES` | `5` | How often the worker checks each repo for new commits |
+| `AUTHOR_TOKEN_BUDGET` | `800000` | Input + output tokens one author run may spend. When it runs out, the run stops cleanly as `budget_exceeded` and keeps the pages it wrote |
 | `GITHUB_WEBHOOK_SECRET` | none | Optional. Enables the webhook route instead of waiting for the next poll (see below) |
 | `DATABASE_URL` | the local Docker Postgres | Only change it if you run Postgres elsewhere |
 
@@ -144,6 +145,18 @@ Public repos work without a token. For private ones, give the worker read-only a
 2. Add it to `.env.local` as `GITHUB_TOKEN=github_pat_...`.
 3. Restart `pnpm worker` and `pnpm dev`, because both read the environment at start.
 4. Add each repo with `pnpm repo:add owner/name`, or the sidebar's **Add repository** box.
+
+## Several repos, one project
+
+The wiki documents one project, even when it spans several repos (an app and its website, say).
+Before adding the repos, open **Project context** in the Repositories panel and write a short brief:
+what the project is, what each repo is for, and who the wiki is for. Give each repo a one-line role.
+
+Both agents read that brief with every request. The author also searches every repo for evidence,
+so a shared page such as `Overview` cites all of them. When a repo's outline names a page another
+repo already wrote, the author proposes an update that adds this repo's side and keeps the page's
+existing citations, instead of skipping the topic. The brief is the owner's intent, not a source:
+every fact on a page still has to cite code.
 
 ## Privacy and what leaves your machine
 
@@ -279,8 +292,9 @@ With the defaults, measured on zustand:
 | Updating after a merge | about $0.004 per affected page |
 | One chat answer | about $0.003 |
 
-The wiki is capped at 30 pages per repo, so writing the first wiki costs about the same however
-large the repo is. Only embedding grows with code size.
+The wiki is capped at 30 pages per repo, but each page of a large repo reads more evidence. A
+746-file mobile app wrote 20 pages for $0.10 and used 414k tokens, past the old 400k cap, which is
+why `AUTHOR_TOKEN_BUDGET` now defaults to 800k (about $0.20 at most per run).
 
 ## Limitations
 

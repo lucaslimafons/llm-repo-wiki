@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -9,6 +10,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -42,6 +44,8 @@ export const repos = pgTable(
     status: repoStatus("status").notNull().default("idle"),
     lastError: text("last_error"),
     lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    /** The owner's one-line description of this repo's part in the project, e.g. "mobile app". */
+    role: text("role"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -260,3 +264,14 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   event: text("event").notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** One row: the owner's brief about the project the repos make up, read by the author and chat agents. */
+export const projectSettings = pgTable(
+  "project_settings",
+  {
+    id: smallint("id").primaryKey().default(1),
+    context: text("context").notNull().default(""),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("project_settings_single_row", sql`${t.id} = 1`)],
+);

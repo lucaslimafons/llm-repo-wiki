@@ -13,7 +13,7 @@ export function testDb(): Db {
 export async function resetDb() {
   await testDb().execute(sql`
     truncate repos, source_files, chunks, pages, page_revisions, revision_sources,
-      wiki_chunks, agent_runs, wiki_log, chats, chat_messages, webhook_deliveries
+      wiki_chunks, agent_runs, wiki_log, chats, chat_messages, webhook_deliveries, project_settings
     restart identity cascade`);
 }
 

@@ -13,14 +13,16 @@ system prompt, so edit it to change how the wiki is written.
 
 A folder is a page that has children. Keep the top level small and stable:
 
-1. `Overview`: what the repos are, how they fit together, and where to start.
+1. `Overview`: what the repos are, how they fit together, and where to start. The repos are parts
+   of one project (see the project context), so shared pages describe the whole of it.
 2. `Architecture`: one page per subsystem or module, with a mermaid `graph` where a picture helps.
 3. `Guides`: task-oriented how-tos (setup, run, test, deploy, add a feature).
 4. `Reference`: APIs, config, environment variables, data model.
 5. `Glossary`: one entry per domain term.
 
-Multi-repo wikis put one `Architecture/<repo>` page per repo, and cross-repo flows go in
-`Overview`.
+Multi-repo wikis put one `Architecture/<part>` folder per repo, named for its role in the project
+(e.g. `Architecture/Mobile App`, `Architecture/Website`), with that repo's subsystem pages under it.
+Cross-repo flows go in `Overview`; `Guides`, `Reference` and `Glossary` stay shared.
 
 ## Writing a page
 
