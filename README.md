@@ -133,6 +133,18 @@ developing, set `GITHUB_WEBHOOK_SECRET` and forward events with
 `gh webhook forward --repo owner/name --events push --url http://127.0.0.1:3000/api/github/webhook --secret <same secret>`.
 Only a `push` to the default branch triggers a sync. A merged PR produces exactly that push.
 
+## Several repos, one project
+
+The wiki documents one project, even when it spans several repos (an app and its website, say).
+Before adding the repos, open **Project context** in the Repositories panel and write a short brief:
+what the project is, what each repo is for, and who the wiki is for. Give each repo a one-line role.
+
+Both agents read that brief with every request. The author also searches every repo for evidence,
+so a shared page such as `Overview` cites all of them. When a repo's outline names a page another
+repo already wrote, the author proposes an update that adds this repo's side and keeps the page's
+existing citations, instead of skipping the topic. The brief is the owner's intent, not a source:
+every fact on a page still has to cite code.
+
 ## Private repositories
 
 Public repos work without a token. For private ones, give the worker read-only access:
@@ -145,18 +157,6 @@ Public repos work without a token. For private ones, give the worker read-only a
 2. Add it to `.env.local` as `GITHUB_TOKEN=github_pat_...`.
 3. Restart `pnpm worker` and `pnpm dev`, because both read the environment at start.
 4. Add each repo with `pnpm repo:add owner/name`, or the sidebar's **Add repository** box.
-
-## Several repos, one project
-
-The wiki documents one project, even when it spans several repos (an app and its website, say).
-Before adding the repos, open **Project context** in the Repositories panel and write a short brief:
-what the project is, what each repo is for, and who the wiki is for. Give each repo a one-line role.
-
-Both agents read that brief with every request. The author also searches every repo for evidence,
-so a shared page such as `Overview` cites all of them. When a repo's outline names a page another
-repo already wrote, the author proposes an update that adds this repo's side and keeps the page's
-existing citations, instead of skipping the topic. The brief is the owner's intent, not a source:
-every fact on a page still has to cite code.
 
 ## Privacy and what leaves your machine
 
