@@ -141,6 +141,29 @@ export function createGitHubClient(opts: { token?: string; fetch?: FetchLike; ba
   };
 }
 
+/** One client per owner, so repos under different accounts can each use their own token. */
+export function createOwnerRoutedClient(
+  tokenFor: (owner: string) => string | undefined,
+  opts: { fetch?: FetchLike; baseUrl?: string } = {},
+): GitHubClient {
+  const clients = new Map<string, GitHubClient>();
+  const pick = (repo: RepoRef): GitHubClient => {
+    const key = repo.owner.toLowerCase();
+    let client = clients.get(key);
+    if (!client) {
+      client = createGitHubClient({ ...opts, token: tokenFor(key) });
+      clients.set(key, client);
+    }
+    return client;
+  };
+  return {
+    getRepo: (repo) => pick(repo).getRepo(repo),
+    getHeadSha: (repo, branch) => pick(repo).getHeadSha(repo, branch),
+    downloadTarball: (repo, sha, accept) => pick(repo).downloadTarball(repo, sha, accept),
+    compare: (repo, base, head) => pick(repo).compare(repo, base, head),
+  };
+}
+
 /** Streams a (gzipped) tarball into memory, keeping regular files only. */
 export async function extractTarball(
   stream: NodeJS.ReadableStream,

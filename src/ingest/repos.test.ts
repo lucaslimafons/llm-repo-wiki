@@ -44,7 +44,7 @@ describe("repo management", () => {
     t.deps.github.getRepo = async () => {
       throw new GitHubError("GitHub 404", 404);
     };
-    expect(await addRepo(t.deps, "acme/secret")).toEqual({ ok: false, error: "acme/secret was not found (private repos need GITHUB_TOKEN)." });
+    expect(await addRepo(t.deps, "acme/secret")).toEqual({ ok: false, error: "acme/secret was not found (private repos need a token for their owner: GITHUB_TOKEN or GITHUB_TOKENS)." });
     expect(await db.select().from(repos)).toEqual([]);
   });
 
