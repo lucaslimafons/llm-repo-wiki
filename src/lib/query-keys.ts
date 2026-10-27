@@ -11,6 +11,9 @@ export const queryKeys = {
     all: ["repos"] as const,
     list: () => ["repos", "list"] as const,
   },
+  jobs: {
+    overview: () => ["jobs", "overview"] as const,
+  },
   chat: {
     all: ["chat"] as const,
     list: () => ["chat", "list"] as const,

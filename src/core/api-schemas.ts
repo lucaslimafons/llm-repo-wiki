@@ -3,6 +3,7 @@ import type { ChatSummary } from "@/agent/chat-store";
 import type { WikiUIMessage } from "@/agent/tools";
 import type { Citation, RevisionSummary, TreeNode } from "@/core/contracts";
 import type { RepoListItem } from "@/ingest/repos";
+import type { JobsOverview } from "@/jobs/overview";
 import type { ProposalView, RevisionDetail } from "@/wiki/store";
 
 /**
@@ -24,6 +25,46 @@ export const repoListSchema: z.ZodType<RepoListItem[]> = z.array(
     fileCount: z.number(),
   }),
 );
+
+export const jobsOverviewSchema: z.ZodType<JobsOverview> = z.object({
+  asOf: isoDate,
+  repos: repoListSchema,
+  jobs: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      state: z.string(),
+      retryCount: z.number(),
+      createdOn: isoDate,
+      startedOn: isoDate.nullable(),
+      completedOn: isoDate.nullable(),
+      error: z.string().nullable(),
+    }),
+  ),
+  runs: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.string(),
+      model: z.string(),
+      status: z.string(),
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      costUsd: z.number(),
+      error: z.string().nullable(),
+      startedAt: isoDate,
+      finishedAt: isoDate.nullable(),
+    }),
+  ),
+  activity: z.array(
+    z.object({
+      at: isoDate,
+      action: z.string(),
+      repo: z.string().nullable(),
+      details: z.record(z.string(), z.unknown()).nullable(),
+    }),
+  ),
+  totalCostUsd: z.number(),
+});
 
 export const treeSchema: z.ZodType<TreeNode[]> = z.array(
   z.lazy(() =>
