@@ -1,6 +1,7 @@
 /** Production wiring shared by the web app and the worker. Keep code-chunk (WASM) out of here. */
 import { db } from "@/db/client";
-import { createGitHubClient, type GitHubClient } from "@/github/client";
+import { createOwnerRoutedClient, type GitHubClient } from "@/github/client";
+import { tokenForOwner } from "@/github/tokens";
 import { enqueueRepoSync } from "@/jobs/queue";
 import { env, openRouterKey } from "@/lib/env";
 import { createOpenRouterEmbedder, type Embedder } from "./embedder";
@@ -11,7 +12,8 @@ let github: GitHubClient | undefined;
 let embedder: Embedder | undefined;
 
 export function prodGitHub(): GitHubClient {
-  github ??= createGitHubClient({ token: env().GITHUB_TOKEN });
+  const { GITHUB_TOKENS, GITHUB_TOKEN } = env();
+  github ??= createOwnerRoutedClient((owner) => tokenForOwner(GITHUB_TOKENS, GITHUB_TOKEN, owner));
   return github;
 }
 
