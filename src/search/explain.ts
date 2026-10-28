@@ -3,17 +3,16 @@ import { z } from "zod";
 import type { SearchHit } from "@/core/contracts";
 import { env, openRouterKey } from "@/lib/env";
 import { providerPrivacy } from "@/lib/openrouter-privacy";
-import { CANDIDATES, defaultDeps, hydrateByKey, rank, RRF_K, tsQuery, type RankedRow, type SearchDeps } from "./index";
+import { CANDIDATES, RERANK_POOL, RRF_K } from "./constants";
+import { defaultDeps, hydrateByKey, rank, tsQuery, type RankedRow, type SearchDeps } from "./index";
 import { rerankHits } from "./rerank";
 
 /** Rows shown per list. The fusion still runs over every candidate, exactly like chat search. */
-export const EXPLAIN_LIST_SIZE = 10;
-/** How many fused hits the reranker re-orders (the eval's pool). */
-export const RERANK_POOL = 30;
+const EXPLAIN_LIST_SIZE = 10;
 const PREVIEW_CHARS = 600;
 
 export const explainInputSchema = z.object({
-  query: z.string().trim().min(1).max(500),
+  query: z.string().trim().min(1, "Type a question.").max(500, "Keep the question under 500 characters."),
   rerank: z.boolean().default(false),
 });
 export type ExplainInput = z.input<typeof explainInputSchema>;
@@ -46,7 +45,7 @@ export type SearchExplanation = {
   rerankAvailable: boolean;
 };
 
-export const RERANK_NEEDS_RETENTION =
+const RERANK_NEEDS_RETENTION =
   "Rerank is off because OPENROUTER_ZDR is on: every rerank model on OpenRouter runs on a provider endpoint without zero data retention.";
 
 const keyOf = (r: { kind: string; id: string }) => `${r.kind}:${r.id}`;

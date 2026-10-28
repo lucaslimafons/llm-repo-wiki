@@ -3,17 +3,17 @@ import { z } from "zod";
 import type { Citation, SearchHit } from "@/core/contracts";
 import type { Db } from "@/db/client";
 import { hydrateByKey } from "@/search";
+import { MAX_ANSWER_CHUNKS } from "@/search/constants";
 import { evidenceText, groundDraft } from "./author";
-import { MAX_ANSWER_CHUNKS } from "./explain-answer-limits";
 import { modelName } from "./models";
 import { startAgentRun } from "./runs";
 
 
 export const explainAnswerInputSchema = z.object({
-  query: z.string().trim().min(1).max(500),
+  query: z.string().trim().min(1, "Type a question.").max(500, "Keep the question under 500 characters."),
   // Keys from /api/explain (`source:<uuid>` / `wiki:<uuid>`). The server re-reads the chunks: never trust client text.
   keys: z
-    .array(z.string().regex(/^(source|wiki):[0-9a-f-]{36}$/i))
+    .array(z.string().regex(/^(source|wiki):[0-9a-f-]{36}$/i, "Expected a chunk key from /api/explain, e.g. source:<uuid>."))
     .min(1)
     .max(MAX_ANSWER_CHUNKS),
 });

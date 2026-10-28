@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Equal, Loader2, PinOff, Search, Sparkles } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { MAX_ANSWER_CHUNKS } from "@/agent/explain-answer-limits";
+import { MAX_ANSWER_CHUNKS } from "@/search/constants";
 import { explainAnswerSchema, searchExplanationSchema } from "@/core/api-schemas";
 import { Markdown } from "@/components/markdown/Markdown";
 import { fetchJson } from "@/lib/fetch-json";

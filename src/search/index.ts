@@ -6,12 +6,10 @@ import { chunks, repos, revisionSources, wikiChunks } from "@/db/schema";
 import { repoFullNameSchema, type RepoRef } from "@/github/repo-name";
 import { createOpenRouterEmbedder, toVector, type Embedder } from "@/ingest/embedder";
 import { env, openRouterKey } from "@/lib/env";
+import { CANDIDATES, RRF_K } from "./constants";
 import { pagePaths } from "./page-path";
 import { providerPrivacy } from "@/lib/openrouter-privacy";
 
-export const RRF_K = 60;
-/** Candidates per retriever before fusion. */
-export const CANDIDATES = 50;
 
 export type SearchMode = "hybrid" | "vector" | "fts";
 export type SearchDeps = { db: Db; embedder: Embedder };
