@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   ArrowDown,
   ArrowUp,
   ChevronRight,
@@ -152,6 +153,9 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
         </SideLink>
         <SideLink href="/lint" active={pathname === "/lint"} icon={<ListChecks className="size-4" />}>
           Lint
+        </SideLink>
+        <SideLink href="/jobs" active={pathname === "/jobs"} icon={<Activity className="size-4" />}>
+          Jobs
         </SideLink>
       </div>
     </nav>

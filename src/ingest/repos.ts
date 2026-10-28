@@ -103,7 +103,7 @@ export async function syncRepoNow(deps: RepoDeps, input: unknown): Promise<Actio
 }
 
 function githubMessage(err: unknown, name: string): string {
-  if (err instanceof GitHubError && err.status === 404) return `${name} was not found (private repos need GITHUB_TOKEN).`;
+  if (err instanceof GitHubError && err.status === 404) return `${name} was not found (private repos need a token for their owner: GITHUB_TOKEN or GITHUB_TOKENS).`;
   if (err instanceof GitHubError && (err.status === 403 || err.status === 429)) return `GitHub refused the request: ${err.message}`;
   return (err as Error).message;
 }

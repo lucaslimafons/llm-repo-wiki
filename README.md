@@ -119,6 +119,7 @@ at start.
 |---|---|---|
 | `OPENROUTER_API_KEY` | none (required for sync and chat) | Your OpenRouter key. Without it the wiki still opens, but nothing can be embedded or written |
 | `GITHUB_TOKEN` | none | Needed for private repos. Without it, public repos work at GitHub's 60 requests/hour |
+| `GITHUB_TOKENS` | none | Per-owner tokens, `owner=token,other-owner=token`, for repos under other accounts. Owners not listed use `GITHUB_TOKEN` |
 | `CHAT_MODEL` | `anthropic/claude-haiku-5.5` | The model you chat with |
 | `AUTHOR_MODEL` | `anthropic/claude-haiku-5.5` | The model that writes and updates pages in the background |
 | `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Must return 1,536 dimensions. Changing it means re-embedding everything (`pnpm db:reset`, then add the repos again) |
@@ -157,6 +158,19 @@ Public repos work without a token. For private ones, give the worker read-only a
 2. Add it to `.env.local` as `GITHUB_TOKEN=github_pat_...`.
 3. Restart `pnpm worker` and `pnpm dev`, because both read the environment at start.
 4. Add each repo with `pnpm repo:add owner/name`, or the sidebar's **Add repository** box.
+
+**Repos under more than one owner.** A fine-grained token covers one owner. Give each other owner its
+own token in `GITHUB_TOKENS=owner=token,other-owner=token`, and the worker sends each repo only its
+owner's token. `GITHUB_TOKEN` stays the default for everyone else.
+
+**Repos where you are only a collaborator** (someone else's personal account) cannot be reached by
+your fine-grained token: GitHub does not list that account as a resource owner. Two ways in:
+
+- **Best:** the owner creates the fine-grained token on their account (only those repos, Contents
+  read-only) and gives it to you. Least privilege, and they can revoke it.
+- **Fallback:** a [classic token](https://github.com/settings/tokens/new) with the `repo` scope. It
+  reaches collaborator repos but grants read **and write** on every repo you can access, so give it
+  a short expiry and list it only for that owner in `GITHUB_TOKENS`.
 
 ## Privacy and what leaves your machine
 
@@ -313,7 +327,7 @@ why `AUTHOR_TOKEN_BUDGET` now defaults to 800k (about $0.20 at most per run).
 | `pnpm setup` prints a message about your shell and creates no database | That's pnpm's own command. Use `pnpm db:setup` |
 | `402 Insufficient credits` | The OpenRouter account has no purchased credits. A key limit is not credit |
 | `404` from OpenRouter, or "No endpoints found" | The model has no zero-retention endpoint, or your account settings exclude it |
-| A private repo is "not found" | `GITHUB_TOKEN` is missing, lacks access to that repo, or awaits organization approval |
+| A private repo is "not found" | No token for its owner (`GITHUB_TOKEN` / `GITHUB_TOKENS`), the token lacks that repo, it awaits organization approval, or you are a collaborator on a personal account (see Private repositories) |
 
 ## Roadmap
 

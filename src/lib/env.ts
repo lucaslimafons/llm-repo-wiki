@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { githubTokensSchema } from "@/github/tokens";
 
 const envSchema = z.object({
   DATABASE_URL: z.url(),
   OPENROUTER_API_KEY: z.string().optional().transform((v) => v || undefined),
   GITHUB_TOKEN: z.string().optional().transform((v) => v || undefined),
+  GITHUB_TOKENS: githubTokensSchema,
   GITHUB_WEBHOOK_SECRET: z.string().optional().transform((v) => v || undefined),
   CHAT_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
   AUTHOR_MODEL: z.string().default("anthropic/claude-haiku-5.5"),
