@@ -78,4 +78,20 @@ describe("repo pipelines", () => {
     expect(o.activity.map((a) => a.action)).not.toContain("author.page_skipped");
     expect(jobsOverviewSchema.safeParse(JSON.parse(JSON.stringify(o))).success).toBe(true);
   });
+
+  it("falls back to the finished run's skip total when no per-page skip events exist", async () => {
+    const [repo] = await db.insert(repos).values({ owner: "acme", name: "old", syncedSha: "b".repeat(40) }).returning();
+    const [run] = await db.insert(agentRuns).values({ kind: "author", model: "m", status: "succeeded" }).returning();
+    const log = (action: string, details: Record<string, unknown>) => ({ actor: "agent" as const, action, repoId: repo.id, details });
+    await db.insert(wikiLog).values([
+      log("author.started", { runId: run.id }),
+      log("author.outline", { runId: run.id, planned: 3 }),
+      log("author.page_proposed", { runId: run.id, path: "Overview" }),
+      log("author.finished", { runId: run.id, proposed: 1, skipped: 2 }),
+    ]);
+
+    const [p] = (await getJobsOverview(db)).pipelines;
+
+    expect(p.author).toMatchObject({ state: "done", proposed: 1, skipped: 2, skipReasons: ["not recorded per page for this run"] });
+  });
 });
