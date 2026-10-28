@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { WikiMarkdown } from "@/components/markdown/WikiMarkdown";
 import { CitationList } from "@/components/wiki/CitationList";
+import { PageProposalReview } from "@/components/wiki/PageProposalReview";
 import { PageView } from "@/components/wiki/PageView";
 import { wikiStore } from "@/wiki/store";
 import { pathFromSegments } from "../../segments";
@@ -16,18 +17,24 @@ async function WikiPageContent({ params, searchParams }: Pick<PageProps<"/wiki/[
     page.stale ? wikiStore.staleFiles(page.id) : Promise.resolve([]),
     wikiStore.listRevisions(page.id),
   ]);
+  const proposal = revisions.some((r) => r.status === "proposed")
+    ? ((await wikiStore.listProposals({ pageId: page.id })).at(-1) ?? null)
+    : null;
+  // A page that exists only as a proposal shows the proposed text, so it can be read before deciding.
+  const shown = page.revisionId === null && proposal ? proposal : page;
   return (
     <PageView
       key={page.id}
       page={page}
       wikiPaths={wikiPaths}
       staleFiles={staleFiles}
-      hasProposal={revisions.some((r) => r.status === "proposed")}
+      review={proposal ? <PageProposalReview proposal={proposal} /> : null}
+      sourceCount={shown.citations.length}
       startEditing={sp.edit === "1"}
-      citations={<CitationList citations={page.citations} />}
+      citations={<CitationList citations={shown.citations} />}
     >
-      {page.revisionId ? (
-        <WikiMarkdown wikiPaths={wikiPaths}>{page.bodyMd}</WikiMarkdown>
+      {page.revisionId || proposal ? (
+        <WikiMarkdown wikiPaths={wikiPaths}>{shown.bodyMd}</WikiMarkdown>
       ) : (
         <p className="text-muted">No accepted content yet.</p>
       )}

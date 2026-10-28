@@ -128,6 +128,9 @@ describe("author-wiki: first run", () => {
     const again = await runAuthorJob(deps(authorModel(outline, drafts), fake, { maxPages: 4 }).d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
     expect(fake.writes()).toHaveLength(before);
     expect(again.skipped.map((s) => s.path)).toEqual(["Overview", "Architecture", "Architecture/Server"]);
+    // Logged too, so the Jobs page can account for every planned page.
+    const skippedLogs = await testDb().select().from(wikiLog).where(eq(wikiLog.action, "author.page_skipped"));
+    expect(skippedLogs.map((l) => l.details?.reason)).toEqual(["exists", "exists", "exists"]);
   });
 
   it("stops proposing once the token budget is spent", async () => {

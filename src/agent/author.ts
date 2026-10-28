@@ -240,6 +240,11 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
     throw error;
   }
 
+  async function skip(path: string, reason: string) {
+    result.skipped.push({ path, reason });
+    await log(db, "author.page_skipped", { repoId: repo.id, details: { runId: run.id, path, reason } });
+  }
+
   async function drop(path: string, reason: string, pageId?: string) {
     result.dropped.push({ path, reason });
     await log(db, "author.page_dropped", { repoId: repo.id, pageId, details: { runId: run.id, path, reason } });
@@ -287,7 +292,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
         continue;
       }
       if (existing.has(path.data)) {
-        result.skipped.push({ path: path.data, reason: "exists" });
+        await skip(path.data, "exists");
         continue;
       }
       if (planned.has(path.data)) continue;
@@ -309,7 +314,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
     if (existingPage) {
       // Another repo of the project wrote it: add this repo's side instead of skipping the topic.
       if (existingPage.citations.some((c) => c.repo === repoName)) {
-        result.skipped.push({ path, reason: "exists" });
+        await skip(path, "exists");
         return;
       }
       return proposeUpdate(existingPage, [purpose, ...queries], [
@@ -412,12 +417,12 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
   async function proposeUpdate(page: PageView, queries: string[], header: string[], why: string) {
     const pageId = page.id;
     if (page.revisionId === null) {
-      result.skipped.push({ path: page.path, reason: "still an unreviewed proposal" });
+      await skip(page.path, "still an unreviewed proposal");
       return;
     }
     const revisions = await store.listRevisions(pageId);
     if (revisions.some((r) => r.status === "proposed" && r.reason?.startsWith(proposalReason(toSha, "")))) {
-      result.skipped.push({ path: page.path, reason: "already proposed for this sha" });
+      await skip(page.path, "already proposed for this sha");
       return;
     }
     await log(db, "author.page_started", { repoId: repo.id, details: { runId: run.id, path: page.path } });

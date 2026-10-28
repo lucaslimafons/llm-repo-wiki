@@ -24,7 +24,8 @@ const STATE_TONE: Record<StepState, string> = {
 /** One repo's trip through the pipeline: sync → author → review, with what each step produced. */
 export function PipelineCard({ p, now, format }: { p: RepoPipeline; now: number; format: { usd: (n: number) => string; tokens: (n: number) => string; duration: (from: string, to: string | null, now: number) => string } }) {
   const { sync, author } = p;
-  const progress = author.planned ? Math.min(1, (author.proposed + author.dropped) / author.planned) : null;
+  const handled = author.proposed + author.dropped + author.skipped;
+  const progress = author.planned ? Math.min(1, handled / author.planned) : null;
   return (
     <li className="rounded-md border border-line bg-surface p-3">
       <div className="mb-2 flex flex-wrap items-baseline gap-x-2">
@@ -50,6 +51,11 @@ export function PipelineCard({ p, now, format }: { p: RepoPipeline; now: number;
                 {author.proposed} page{author.proposed === 1 ? "" : "s"} written
                 {author.planned !== null ? ` of ${author.planned} planned` : ""}
                 {author.dropped > 0 ? ` · ${author.dropped} dropped` : ""}
+                {author.skipped > 0 && (
+                  <span title={`Left alone: ${author.skipReasons.join("; ")}`} className="underline decoration-dotted">
+                    {` · ${author.skipped} skipped`}
+                  </span>
+                )}
               </p>
               {progress !== null && (
                 <div className="my-1 h-1.5 overflow-hidden rounded bg-line" role="progressbar" aria-valuenow={Math.round(progress * 100)} aria-valuemin={0} aria-valuemax={100}>

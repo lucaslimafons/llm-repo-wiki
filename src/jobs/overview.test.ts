@@ -54,6 +54,7 @@ describe("repo pipelines", () => {
       log("author.page_started", { runId: run.id, path: "Overview" }),
       log("author.page_proposed", { runId: run.id, path: "Overview" }),
       log("author.page_dropped", { runId: run.id, path: "Glossary" }),
+      log("author.page_skipped", { runId: run.id, path: "Guides", reason: "exists" }),
       log("author.page_started", { runId: run.id, path: "Architecture" }),
     ]);
     const [page] = await db.insert(pages).values({ title: "Overview" }).returning();
@@ -67,13 +68,14 @@ describe("repo pipelines", () => {
         fullName: "acme/api",
         role: "API",
         sync: expect.objectContaining({ state: "done", indexed: 72, embedded: 300, secretsDropped: [".env.example"] }),
-        author: expect.objectContaining({ state: "running", planned: 4, proposed: 1, dropped: 1, current: "Architecture", tokens: 1000, costUsd: 0.05 }),
+        author: expect.objectContaining({ state: "running", planned: 4, proposed: 1, dropped: 1, skipped: 1, skipReasons: ["exists"], current: "Architecture", tokens: 1000, costUsd: 0.05 }),
         pendingReview: 1,
       }),
     ]);
     expect(o.runs.find((r) => r.id === run.id)?.repo).toBe("acme/api");
     // Progress ticks feed the card, not the activity feed.
     expect(o.activity.map((a) => a.action)).not.toContain("author.page_started");
+    expect(o.activity.map((a) => a.action)).not.toContain("author.page_skipped");
     expect(jobsOverviewSchema.safeParse(JSON.parse(JSON.stringify(o))).success).toBe(true);
   });
 });

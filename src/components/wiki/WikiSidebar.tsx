@@ -6,8 +6,8 @@ import { PageTree } from "./PageTree";
 
 async function TreeLoader() {
   await connection();
-  const [tree, proposals] = await Promise.all([wikiStore.listTree(), wikiStore.listProposals()]);
-  return <PageTree initialTree={tree} proposalCount={proposals.length} />;
+  const [tree, proposalCount] = await Promise.all([wikiStore.listTree(), wikiStore.countProposals()]);
+  return <PageTree initialTree={tree} proposalCount={proposalCount} />;
 }
 
 /** Page tree (wiki track) above the repos panel (ingest track). */

@@ -4,7 +4,7 @@ import type { WikiUIMessage } from "@/agent/tools";
 import type { Citation, RevisionSummary, TreeNode } from "@/core/contracts";
 import type { RepoListItem } from "@/ingest/repos";
 import type { JobsOverview } from "@/jobs/overview";
-import type { ProposalView, RevisionDetail } from "@/wiki/store";
+import type { ProposalSummary, ProposalView, RevisionDetail } from "@/wiki/store";
 
 /**
  * Response schemas for the app's own JSON routes, parsed by the client fetchers. Each is typed
@@ -52,6 +52,8 @@ export const jobsOverviewSchema: z.ZodType<JobsOverview> = z.object({
         planned: z.number().nullable(),
         proposed: z.number(),
         dropped: z.number(),
+        skipped: z.number(),
+        skipReasons: z.array(z.string()),
         current: z.string().nullable(),
         tokens: z.number(),
         costUsd: z.number(),
@@ -141,14 +143,23 @@ const revisionDetailShape = {
 
 export const revisionsSchema: z.ZodType<RevisionDetail[]> = z.array(z.object(revisionDetailShape));
 
-export const proposalsSchema: z.ZodType<ProposalView[]> = z.array(
+export const proposalSchema: z.ZodType<ProposalView> = z.object({
+  ...revisionDetailShape,
+  pagePath: z.string(),
+  isNewPage: z.boolean(),
+  currentTitle: z.string(),
+  currentBodyMd: z.string(),
+  outdated: z.boolean(),
+});
+
+export const proposalSummariesSchema: z.ZodType<ProposalSummary[]> = z.array(
   z.object({
-    ...revisionDetailShape,
+    ...revisionSummaryShape,
+    title: z.string(),
     pagePath: z.string(),
     isNewPage: z.boolean(),
-    currentTitle: z.string(),
-    currentBodyMd: z.string(),
     outdated: z.boolean(),
+    citationCount: z.number(),
   }),
 );
 

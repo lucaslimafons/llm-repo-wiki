@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Author } from "@/core/contracts";
 import { extractCitations } from "@/wiki/citations";
 import { WikiError } from "@/wiki/errors";
+import { decideProposals } from "@/wiki/review";
 import { wikiStore } from "@/wiki/store";
 import { pageTitleSchema } from "@/wiki/title";
 
@@ -113,6 +114,13 @@ export async function rejectRevisionAction(input: { revisionId: string }) {
     await wikiStore.rejectRevision(v.revisionId);
     return null;
   });
+}
+
+/** Bulk accept / reject from the review queue; ordering and per-item failures live in decideProposals. */
+export async function decideRevisionsAction(input: { revisionIds: string[]; accept: boolean }) {
+  return run(z.object({ revisionIds: z.array(id).min(1).max(500), accept: z.boolean() }), input, (v) =>
+    decideProposals(wikiStore, v.revisionIds, v.accept),
+  );
 }
 
 export async function revertRevisionAction(input: { revisionId: string }) {
