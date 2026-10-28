@@ -138,7 +138,10 @@ Only a `push` to the default branch triggers a sync. A merged PR produces exactl
 
 The wiki documents one project, even when it spans several repos (an app and its website, say).
 Before adding the repos, open **Project context** in the Repositories panel and write a short brief:
-what the project is, what each repo is for, and who the wiki is for. Give each repo a one-line role.
+what the project is, what each repo is for, and who the wiki is for. Give each repo a one-line role,
+and pick a layout: **by topic** (one shared tree, each repo's subsystems under `Architecture/<part>`)
+or **by repository** (a top-level folder per repo). Either way the top-level `Overview` and
+`Architecture` describe the whole project and how the repos connect.
 
 Both agents read that brief with every request. The author also searches every repo for evidence,
 so a shared page such as `Overview` cites all of them. When a repo's outline names a page another

@@ -271,7 +271,12 @@ export const projectSettings = pgTable(
   {
     id: smallint("id").primaryKey().default(1),
     context: text("context").notNull().default(""),
+    /** "topic": one shared tree. "repo": a top-level folder per repo. See WIKI_SCHEMA.md. */
+    layout: text("layout").notNull().default("topic"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [check("project_settings_single_row", sql`${t.id} = 1`)],
+  (t) => [
+    check("project_settings_single_row", sql`${t.id} = 1`),
+    check("project_settings_layout", sql`${t.layout} in ('topic', 'repo')`),
+  ],
 );

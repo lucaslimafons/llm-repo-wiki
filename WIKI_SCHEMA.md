@@ -13,16 +13,25 @@ system prompt, so edit it to change how the wiki is written.
 
 A folder is a page that has children. Keep the top level small and stable:
 
-1. `Overview`: what the repos are, how they fit together, and where to start. The repos are parts
-   of one project (see the project context), so shared pages describe the whole of it.
-2. `Architecture`: one page per subsystem or module, with a mermaid `graph` where a picture helps.
+1. `Overview`: what the project is, what each repo does, and where to start.
+2. `Architecture`: the high-level view of the whole system, with a mermaid `graph` of the parts and
+   how they talk to each other. Subsystem pages go under it.
 3. `Guides`: task-oriented how-tos (setup, run, test, deploy, add a feature).
 4. `Reference`: APIs, config, environment variables, data model.
 5. `Glossary`: one entry per domain term.
 
-Multi-repo wikis put one `Architecture/<part>` folder per repo, named for its role in the project
-(e.g. `Architecture/Mobile App`, `Architecture/Website`), with that repo's subsystem pages under it.
-Cross-repo flows go in `Overview`; `Guides`, `Reference` and `Glossary` stay shared.
+### Several repos in one project
+
+The repos are parts of one project. `Overview` and `Architecture` always describe the whole project;
+every repo's run extends them with its side. Below them, the owner picks a layout on the Project
+context page:
+
+- **By topic** (default): one shared tree. Each repo's subsystems go in `Architecture/<part>`,
+  named for its role (`Architecture/Mobile App`, `Architecture/Website`). `Guides`, `Reference` and
+  `Glossary` are shared. Suits repos that ship as one product.
+- **By repository:** one top-level folder per repo, named after it (`recipe-mobile/`,
+  `recipe-api/`), each with its own Architecture, Guides and Reference pages. Suits repos owned by
+  different teams or read separately.
 
 ## Writing a page
 
