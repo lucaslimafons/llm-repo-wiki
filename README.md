@@ -53,6 +53,12 @@ Notable choices:
   the exact commit and lines, and sessions are saved, so you can come back to a conversation.
 - **Stays fresh.** A worker polls each repo's default branch, re-indexes only the changed files,
   marks the pages that cite them as stale, and proposes updates.
+- **Shows its work.** `/pipeline` draws each repo's run as stages on a board (poll, download,
+  filter and secret scan, chunk and embed, author, review), live while it runs and as a replay
+  afterwards, with failures and budget stops shown at the stage where they happened.
+  `/explain` steps through retrieval for any question: the full-text and vector lists side by
+  side, how RRF fuses them, an optional rerank, and an answer whose citations are grounded (kept
+  or stripped). Chat search steps link there with "How was this found?".
 - **Organizes pages as a tree.** Any page can have subpages, as in Notion, Confluence or Azure
   DevOps wikis. `pnpm export` writes the accepted wiki as plain markdown that renders on GitHub: a
   `slug.md` per page, a `README.md` for each page with subpages, and a root index.
@@ -108,7 +114,7 @@ its pages under **Proposals**.
 | `pnpm export --out <dir>` | Write the accepted wiki as a folder of markdown that renders on GitHub |
 | `pnpm eval` | Retrieval eval: 8 search strategies, recall@5 and MRR |
 | `pnpm bench:chat`, `pnpm bench:author` | Compare models on the real chat agent and author job |
-| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 255 tests against a real Postgres, plus checks |
+| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 298 tests against a real Postgres, plus checks |
 
 ## Configuration
 
@@ -123,6 +129,7 @@ at start.
 | `CHAT_MODEL` | `anthropic/claude-haiku-5.5` | The model you chat with |
 | `AUTHOR_MODEL` | `anthropic/claude-haiku-5.5` | The model that writes and updates pages in the background |
 | `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Must return 1,536 dimensions. Changing it means re-embedding everything (`pnpm db:reset`, then add the repos again) |
+| `RERANK_MODEL` | `cohere/rerank-4-pro` | Used only by the optional rerank step on `/explain`, one paid call per click |
 | `OPENROUTER_ZDR` | `true` | Every model call requires a zero-data-retention endpoint. Keep it on for private code |
 | `POLL_INTERVAL_MINUTES` | `5` | How often the worker checks each repo for new commits |
 | `AUTHOR_TOKEN_BUDGET` | `800000` | Input + output tokens one author run may spend. When it runs out, the run stops cleanly as `budget_exceeded` and keeps the pages it wrote |

@@ -2,6 +2,7 @@
 
 import { getToolName, type ToolUIPart, type DynamicToolUIPart } from "ai";
 import { AlertTriangle, ArrowRightLeft, Ban, Check, FilePlus, FileText, ListTree, Loader2, Pencil, Search, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { SearchToolOutput, WikiTools } from "@/agent/tools";
 import type { InferUITools } from "ai";
@@ -99,6 +100,11 @@ export function ToolPart({
     <div className="my-1 flex min-w-0 items-start gap-1.5 text-xs text-muted">
       <span className="mt-px shrink-0">{icon}</span>
       <span className="min-w-0 flex-1 break-words">{label}</span>
+      {name === "searchKnowledge" && part.state === "output-available" && str(input?.query) && (
+        <Link href={`/explain?q=${encodeURIComponent(str(input?.query))}`} className="shrink-0 text-accent hover:underline">
+          How was this found?
+        </Link>
+      )}
       {status && <span className="shrink-0">{status}</span>}
     </div>
   );
