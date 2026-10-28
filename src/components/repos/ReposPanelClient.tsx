@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, Clock, GitBranch, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, GitBranch, Loader2, NotebookText, Plus, RefreshCw, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { addRepoAction, removeRepoAction, syncRepoNowAction } from "@/ingest/actions";
 import type { ActionResult, RepoListItem } from "@/ingest/repos";
@@ -55,7 +56,13 @@ export function ReposPanelClient({ initialRepos }: { initialRepos: RepoListItem[
 
   return (
     <section className="flex flex-col gap-2 border-t border-line p-3 text-sm">
-      <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Repositories</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Repositories</h2>
+        <Link href="/project" className="flex items-center gap-1 text-xs text-muted hover:text-accent">
+          <NotebookText className="size-3.5" />
+          Project context
+        </Link>
+      </div>
 
       <form onSubmit={onSubmit} className="flex gap-1">
         <input

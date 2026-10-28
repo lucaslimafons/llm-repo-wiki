@@ -1,0 +1,2 @@
+ALTER TABLE "project_settings" ADD COLUMN "layout" text DEFAULT 'topic' NOT NULL;--> statement-breakpoint
+ALTER TABLE "project_settings" ADD CONSTRAINT "project_settings_layout" CHECK ("project_settings"."layout" in ('topic', 'repo'));

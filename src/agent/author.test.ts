@@ -3,7 +3,7 @@ import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SearchHit } from "@/core/contracts";
-import { agentRuns, repos, wikiLog } from "@/db/schema";
+import { agentRuns, projectSettings, repos, wikiLog } from "@/db/schema";
 import { resetDb, testDb } from "@/test/db";
 import { collectCitations, groundDraft, runAuthorJob, type AuthorDeps } from "./author";
 import { createFakeStore } from "./testing/fake-store";
@@ -99,8 +99,8 @@ describe("author-wiki: first run", () => {
     // The child landed under its (proposed) parent.
     const server = await fake.store.getPage({ path: "Architecture/Server" });
     expect(server?.parentId).toBe((await fake.store.getPage({ path: "Architecture" }))?.id);
-    // Evidence came from this repo's sources only.
-    expect(searches.every((s) => (s as { scope: string; repo: string }).scope === "source" && (s as { repo: string }).repo === "acme/api")).toBe(true);
+    // Evidence comes from every repo's sources: the repos are parts of one project.
+    expect(searches.every((s) => (s as { scope: string }).scope === "source" && !("repo" in (s as object)))).toBe(true);
   });
 
   it("records the run's tokens and cost from provider metadata, and logs to wiki_log", async () => {
@@ -213,7 +213,7 @@ describe("author-wiki: grounding", () => {
   });
 
   it("rejects a cited line range outside the retrieved chunk", () => {
-    const out = groundDraft("acme/api", { bodyMd: `x [a](source:acme/api/src/server.ts#L15-L40@${SHA})`, citations: [] }, [hit]);
+    const out = groundDraft({ bodyMd: `x [a](source:acme/api/src/server.ts#L15-L40@${SHA})`, citations: [] }, [hit]);
     expect(out.citations).toEqual([]);
     expect(out.rejected).toBe(1);
   });
@@ -260,8 +260,61 @@ describe("author-wiki: resilience", () => {
 });
 
 describe("collectCitations", () => {
-  it("merges body links with the returned list, dedupes, and keeps only this repo", () => {
+  it("merges body links with the returned list, dedupes across repos, and skips garbage", () => {
     const body = `a [x](${cite("a.ts")}) b [y](${cite("a.ts")}) c [z](source:other/repo/b.ts#L1@${SHA})`;
-    expect(collectCitations("acme/api", body, [cite("b.ts"), "garbage"]).map((c) => c.path)).toEqual(["b.ts", "a.ts"]);
+    expect(collectCitations(body, [cite("b.ts"), "garbage"]).map((c) => `${c.repo}/${c.path}`)).toEqual([
+      "acme/api/b.ts",
+      "acme/api/a.ts",
+      "other/repo/b.ts",
+    ]);
+  });
+});
+
+describe("author-wiki: one project, several repos", () => {
+  const webCite = { repo: "acme/web", path: "app/page.tsx", commitSha: SHA, startLine: 1, endLine: 10 };
+  const webHref = `source:acme/web/app/page.tsx#L1-L10@${SHA}`;
+
+  it("extends a page another repo wrote, keeping that repo's citations", async () => {
+    const extended = (title: string) => ({
+      bodyMd: `# ${title}\n\nThe site [p](${webHref}). The API [s](${cite("src/server.ts")}).`,
+      citations: [webHref, cite("src/server.ts")],
+    });
+    const { d, fake } = deps(authorModel(["Overview"], extended));
+    fake.seed("Overview", `# Overview\n\nThe site [p](${webHref}).`, [webCite]);
+
+    const result = await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+
+    expect(result.proposed).toEqual(["Overview"]);
+    const [write] = fake.writes();
+    expect(write.method).toBe("updatePage");
+    const input = write.input as { bodyMd: string; citations: { repo: string }[]; mode: string };
+    expect(input.mode).toBe("propose");
+    expect(input.citations.map((c) => c.repo).sort()).toEqual(["acme/api", "acme/web"]);
+    expect(input.bodyMd).toContain(webHref);
+  });
+
+  it("still strips a citation into another repo that was neither retrieved nor already on the page", () => {
+    const out = groundDraft({ bodyMd: `x [p](${webHref})`, citations: [webHref] }, [hit]);
+    expect(out.citations).toEqual([]);
+    expect(out.bodyMd).toBe("x p");
+  });
+
+  it("puts the owner's project context and the other repos into the outline", async () => {
+    const db = testDb();
+    const [web] = await db.insert(repos).values({ owner: "acme", name: "web", role: "marketing website" }).returning();
+    await db.insert(projectSettings).values({ id: 1, context: "Acme is one product." });
+    const prompts: string[] = [];
+    const base = authorModel(["Overview"], goodDraft);
+    const model = new MockLanguageModelV4({
+      modelId: "mock-author",
+      doGenerate: async (opts) => (prompts.push(JSON.stringify(opts.prompt)), base.doGenerate(opts)),
+    });
+
+    await runAuthorJob(deps(model).d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+
+    const outline = prompts.find((p) => p.includes("OUTLINE"))!;
+    expect(outline).toContain("Acme is one product.");
+    expect(outline).toContain(`acme/web: ${web.role}`);
+    expect(outline).toContain("Other repositories of this project are already in the wiki (acme/web)");
   });
 });

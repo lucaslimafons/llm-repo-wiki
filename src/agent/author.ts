@@ -6,6 +6,7 @@ import type { Db } from "@/db/client";
 import { chunks, repos, sourceFiles, wikiLog } from "@/db/schema";
 import { parseSourceHref } from "@/lib/source-links";
 import { modelName } from "./models";
+import { formatProjectContext, getProjectContext } from "@/project/context";
 import { buildAuthorInstructions, loadWikiSchema } from "./prompts";
 import { wrapRetrieved } from "./retrieved";
 import { startAgentRun } from "./runs";
@@ -25,6 +26,8 @@ export type AuthorDeps = {
   /** Input + output tokens for the whole run; the job stops proposing once it is spent. */
   tokenBudget?: number;
 };
+
+export const DEFAULT_AUTHOR_TOKEN_BUDGET = 800_000;
 
 export type AuthorResult = {
   mode: "initial" | "incremental" | "skipped";
@@ -53,13 +56,15 @@ const pageDraftSchema = z.object({
 
 const SOURCE_LINK = /\]\((source:[^)\s]+)\)/g;
 
-/** Union of the returned citations and the ones linked in the body, limited to this repo. */
-export function collectCitations(repo: string, bodyMd: string, hrefs: string[]): Citation[] {
+const citationKey = (c: Citation) => `${c.repo}/${c.path}#${c.startLine ?? ""}-${c.endLine ?? ""}@${c.commitSha}`;
+
+/** Union of the returned citations and the ones linked in the body, deduplicated. */
+export function collectCitations(bodyMd: string, hrefs: string[]): Citation[] {
   const all = [...hrefs, ...[...bodyMd.matchAll(SOURCE_LINK)].map((m) => m[1])];
   const out = new Map<string, Citation>();
   for (const href of all) {
     const c = parseSourceHref(href.trim());
-    if (c && c.repo === repo) out.set(`${c.path}#${c.startLine ?? ""}-${c.endLine ?? ""}@${c.commitSha}`, c);
+    if (c) out.set(citationKey(c), c);
   }
   return [...out.values()];
 }
@@ -83,18 +88,21 @@ function isGrounded(c: Citation, hits: SearchHit[]): boolean {
 }
 
 /**
- * Keeps only citations that point inside a chunk the job actually retrieved; anything else was
- * invented. Ungrounded links in the body are unwrapped to plain text so they never render as sources.
+ * Keeps only citations that point inside a chunk the job actually retrieved, or that the page being
+ * extended already carried (`kept`); anything else was invented. Ungrounded links are unwrapped to
+ * plain text so they never render as sources.
  */
-export function groundDraft(repo: string, draft: { bodyMd: string; citations: string[] }, hits: SearchHit[]) {
+export function groundDraft(draft: { bodyMd: string; citations: string[] }, hits: SearchHit[], kept: Citation[] = []) {
+  const keptKeys = new Set(kept.map(citationKey));
+  const ok = (c: Citation) => isGrounded(c, hits) || keptKeys.has(citationKey(c));
   let rejected = 0;
   const bodyMd = draft.bodyMd.replace(/\[([^\]]*)\]\((source:[^)\s]+)\)/g, (link, text: string, href: string) => {
     const c = parseSourceHref(href);
-    if (c && isGrounded(c, hits)) return link;
+    if (c && ok(c)) return link;
     rejected++;
     return text;
   });
-  const citations = collectCitations(repo, bodyMd, draft.citations).filter((c) => isGrounded(c, hits));
+  const citations = collectCitations(bodyMd, draft.citations).filter(ok);
   return { bodyMd, citations, rejected };
 }
 
@@ -146,7 +154,7 @@ async function allPages(store: WikiStore): Promise<PageView[]> {
 export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Promise<AuthorResult> {
   const { db, store } = deps;
   const maxPages = deps.maxPages ?? 30;
-  const tokenBudget = deps.tokenBudget ?? 400_000;
+  const tokenBudget = deps.tokenBudget ?? DEFAULT_AUTHOR_TOKEN_BUDGET;
   const result: AuthorResult = { mode: "skipped", proposed: [], dropped: [], skipped: [], status: "succeeded" };
 
   const [repo] = await db.select().from(repos).where(eq(repos.id, payload.repoId));
@@ -157,7 +165,14 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
 
   const run = await startAgentRun(db, { kind: "author", model: modelName(deps.model) });
   const author = { kind: "agent" as const, agentRunId: run.id };
-  const instructions = buildAuthorInstructions({ schema: await (deps.loadSchema ?? loadWikiSchema)(), repo: repoName, sha: toSha });
+  const project = await getProjectContext(db);
+  const siblings = project.repos.filter((r) => r.fullName !== repoName);
+  const instructions = buildAuthorInstructions({
+    schema: await (deps.loadSchema ?? loadWikiSchema)(),
+    repo: repoName,
+    sha: toSha,
+    project: formatProjectContext(project),
+  });
   const overBudget = () => {
     const t = run.totals();
     return t.inputTokens + t.outputTokens >= tokenBudget;
@@ -165,10 +180,11 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
 
   // The job retrieves and the model only writes: tools + JSON output in one loop let models skip
   // searching (or never stop), and evidence we chose is evidence we can check citations against.
+  // Every repo is searched: they are parts of one project, so a shared page cites all of them.
   async function gather(queries: string[]): Promise<SearchHit[]> {
     const seen = new Map<string, SearchHit>();
     for (const query of queries.filter((q) => q.trim()).slice(0, MAX_QUERIES)) {
-      for (const hit of await deps.search({ query, scope: "source", repo: repoName, limit: HITS_PER_QUERY })) {
+      for (const hit of await deps.search({ query, scope: "source", limit: HITS_PER_QUERY })) {
         if (hit.kind === "source" && !seen.has(hit.chunkId)) seen.set(hit.chunkId, hit);
       }
     }
@@ -250,6 +266,9 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
           ? `README excerpts:\n\n${readme.map((r) => wrapRetrieved(`${repoName}/${r.path}#L${r.startLine}-L${r.endLine}`, r.content.slice(0, MAX_HIT_CHARS))).join("\n\n")}`
           : `The repository has no README.`,
         `Existing wiki index (extend it, don't duplicate it):\n${treeToText(tree)}`,
+        ...(siblings.length
+          ? [`Other repositories of this project are already in the wiki (${siblings.map((r) => r.fullName).join(", ")}). Reuse an existing path for a topic both share: that page gets extended with this repository's side. Use a new path only for a part this repository alone has.`]
+          : []),
       ].join("\n\n"),
       output: Output.object({ schema: outlineSchema }),
       maxOutputTokens: 16_000,
@@ -285,9 +304,17 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
   }
 
   async function writeNewPage(path: string, purpose: string, queries: string[]) {
-    if (await store.getPage({ path })) {
-      result.skipped.push({ path, reason: "exists" });
-      return;
+    const existingPage = await store.getPage({ path });
+    if (existingPage) {
+      // Another repo of the project wrote it: add this repo's side instead of skipping the topic.
+      if (existingPage.citations.some((c) => c.repo === repoName)) {
+        result.skipped.push({ path, reason: "exists" });
+        return;
+      }
+      return proposeUpdate(existingPage, [purpose, ...queries], [
+        `Extend the wiki page "${path}" with ${repoName}'s part of the project: ${purpose}`,
+        `The page was written from the project's other repositories. Keep what it says and its citations, and add what ${repoName} contributes, citing the evidence below.`,
+      ], `extend with ${repoName}: ${purpose}`);
     }
     const parentPath = parentOf(path);
     const parent = parentPath ? await store.getPage({ path: parentPath }) : null;
@@ -297,7 +324,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
     if (hits.length === 0) return drop(path, "no evidence found for it");
     const written = await draft(`Write the wiki page "${path}" for ${repoName}. Purpose: ${purpose}\nUse only the evidence below and cite every claim.`, hits);
     if ("error" in written) return drop(path, written.error);
-    const page = groundDraft(repoName, written, hits);
+    const page = groundDraft(written, hits);
     const citations = page.citations;
     if (citations.length === 0) return drop(path, "the draft cited no retrieved source");
     const title = path.split("/").at(-1)!;
@@ -401,7 +428,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
       await drop(page.path, written.error, pageId);
       return;
     }
-    const updated = groundDraft(repoName, written, hits);
+    const updated = groundDraft(written, hits, page.citations);
     const citations = updated.citations;
     if (citations.length === 0) {
       await drop(page.path, "the updated draft cited no retrieved source", pageId);
