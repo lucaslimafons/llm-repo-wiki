@@ -1,8 +1,8 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, notInArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { agentRuns, repos, wikiLog } from "@/db/schema";
 import { QUEUES } from "@/core/contracts";
-import { listRepos, type RepoListItem } from "@/ingest/repos";
+import { getRepoPipelines, type RepoPipeline } from "./pipeline";
 
 export type QueueJob = {
   id: string;
@@ -14,6 +14,8 @@ export type QueueJob = {
   completedOn: string | null;
   /** The failure message pg-boss stored, for failed jobs only. */
   error: string | null;
+  /** owner/name of the repo the job works on, when it carries one. */
+  repo: string | null;
 };
 
 export type AgentRunItem = {
@@ -27,6 +29,7 @@ export type AgentRunItem = {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  repo: string | null;
 };
 
 export type ActivityItem = { at: string; action: string; repo: string | null; details: Record<string, unknown> | null };
@@ -34,7 +37,7 @@ export type ActivityItem = { at: string; action: string; repo: string | null; de
 export type JobsOverview = {
   /** Server time of this snapshot: relative times use it, so SSR and hydration render the same text. */
   asOf: string;
-  repos: RepoListItem[];
+  pipelines: RepoPipeline[];
   jobs: QueueJob[];
   runs: AgentRunItem[];
   activity: ActivityItem[];
@@ -44,24 +47,29 @@ export type JobsOverview = {
 const LIMIT = 30;
 const iso = (d: Date | string | null) => (d === null ? null : new Date(d).toISOString());
 
+/** Per-step progress lives in the pipeline cards; the feed keeps the milestones. */
+const PROGRESS_EVENTS = ["author.page_started", "author.outline"];
+
 /** Everything the /jobs page shows, read live. Internal pg-boss queues and the poll tick are hidden. */
 export async function getJobsOverview(db: Db): Promise<JobsOverview> {
-  const [repoList, jobs, runs, activity, total] = await Promise.all([
-    listRepos(db),
+  const [{ pipelines, runRepo }, jobs, runs, activity, total] = await Promise.all([
+    getRepoPipelines(db),
     listQueueJobs(db),
     db.select().from(agentRuns).orderBy(desc(agentRuns.startedAt)).limit(LIMIT),
     db
       .select({ at: wikiLog.at, action: wikiLog.action, details: wikiLog.details, owner: repos.owner, name: repos.name })
       .from(wikiLog)
       .leftJoin(repos, eq(wikiLog.repoId, repos.id))
+      .where(notInArray(wikiLog.action, PROGRESS_EVENTS))
       .orderBy(desc(wikiLog.at))
       .limit(LIMIT),
     db.select({ sum: sql<string>`coalesce(sum(${agentRuns.costUsd}), 0)` }).from(agentRuns),
   ]);
+  const repoName = new Map(pipelines.map((p) => [p.repoId, p.fullName]));
   return {
     asOf: new Date().toISOString(),
-    repos: repoList,
-    jobs,
+    pipelines,
+    jobs: jobs.map(({ repoId, ...j }) => ({ ...j, repo: (repoId && repoName.get(repoId)) || null })),
     runs: runs.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -73,6 +81,7 @@ export async function getJobsOverview(db: Db): Promise<JobsOverview> {
       error: r.error,
       startedAt: r.startedAt.toISOString(),
       finishedAt: iso(r.finishedAt),
+      repo: repoName.get(runRepo.get(r.id) ?? "") ?? null,
     })),
     activity: activity.map((a) => ({
       at: a.at.toISOString(),
@@ -85,7 +94,7 @@ export async function getJobsOverview(db: Db): Promise<JobsOverview> {
 }
 
 /** pg-boss creates its schema when the worker first starts, so a fresh database has no table yet. */
-async function listQueueJobs(db: Db): Promise<QueueJob[]> {
+async function listQueueJobs(db: Db): Promise<(Omit<QueueJob, "repo"> & { repoId: string | null })[]> {
   const exists = await db.execute<{ t: string | null }>(sql`select to_regclass('pgboss.job')::text as t`);
   if (!exists[0]?.t) return [];
   const rows = await db.execute<{
@@ -97,8 +106,9 @@ async function listQueueJobs(db: Db): Promise<QueueJob[]> {
     started_on: Date | null;
     completed_on: Date | null;
     error: string | null;
+    repo_id: string | null;
   }>(sql`
-    select id, name, state::text as state, retry_count, created_on, started_on, completed_on,
+    select id, name, state::text as state, retry_count, created_on, started_on, completed_on, data->>'repoId' as repo_id,
       case when state = 'failed' then left(coalesce(output->>'message', output::text), 300) end as error
     from pgboss.job
     where name not like '\_\_pgboss%' and name <> ${QUEUES.pollRepos}
@@ -113,5 +123,6 @@ async function listQueueJobs(db: Db): Promise<QueueJob[]> {
     startedOn: iso(r.started_on),
     completedOn: iso(r.completed_on),
     error: r.error,
+    repoId: r.repo_id,
   }));
 }

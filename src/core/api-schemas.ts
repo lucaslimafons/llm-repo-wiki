@@ -26,9 +26,40 @@ export const repoListSchema: z.ZodType<RepoListItem[]> = z.array(
   }),
 );
 
+const STEP_STATE = z.enum(["idle", "waiting", "running", "done", "stopped", "failed"]);
+
 export const jobsOverviewSchema: z.ZodType<JobsOverview> = z.object({
   asOf: isoDate,
-  repos: repoListSchema,
+  pipelines: z.array(
+    z.object({
+      repoId: z.string(),
+      fullName: z.string(),
+      role: z.string().nullable(),
+      lastError: z.string().nullable(),
+      sync: z.object({
+        state: STEP_STATE,
+        startedAt: isoDate.nullable(),
+        finishedAt: isoDate.nullable(),
+        indexed: z.number().nullable(),
+        embedded: z.number().nullable(),
+        secretsDropped: z.array(z.string()),
+      }),
+      author: z.object({
+        state: STEP_STATE,
+        queuePosition: z.number().nullable(),
+        startedAt: isoDate.nullable(),
+        finishedAt: isoDate.nullable(),
+        planned: z.number().nullable(),
+        proposed: z.number(),
+        dropped: z.number(),
+        current: z.string().nullable(),
+        tokens: z.number(),
+        costUsd: z.number(),
+        status: z.string().nullable(),
+      }),
+      pendingReview: z.number(),
+    }),
+  ),
   jobs: z.array(
     z.object({
       id: z.string(),
@@ -39,6 +70,7 @@ export const jobsOverviewSchema: z.ZodType<JobsOverview> = z.object({
       startedOn: isoDate.nullable(),
       completedOn: isoDate.nullable(),
       error: z.string().nullable(),
+      repo: z.string().nullable(),
     }),
   ),
   runs: z.array(
@@ -53,6 +85,7 @@ export const jobsOverviewSchema: z.ZodType<JobsOverview> = z.object({
       error: z.string().nullable(),
       startedAt: isoDate,
       finishedAt: isoDate.nullable(),
+      repo: z.string().nullable(),
     }),
   ),
   activity: z.array(
