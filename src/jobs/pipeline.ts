@@ -98,6 +98,9 @@ export async function getRepoPipelines(db: Db): Promise<{ pipelines: RepoPipelin
     const count = (action: string) => runLogs.filter((l) => l.action === action).length;
     const planned = runLogs.findLast((l) => l.action === "author.outline")?.details?.planned;
     const position = queuedAuthors.findIndex((j) => j.repo_id === r.id);
+    // Runs from before per-page skip events still carry the total in their author.finished entry.
+    const skipEvents = runLogs.filter((l) => l.action === "author.page_skipped");
+    const finishedSkips = runLogs.findLast((l) => l.action === "author.finished")?.details?.skipped;
 
     // The run row is the truth for a started run; the queue only knows about waiting.
     let authorState = jobState(authorJob?.state);
@@ -130,8 +133,12 @@ export async function getRepoPipelines(db: Db): Promise<{ pipelines: RepoPipelin
         planned: typeof planned === "number" ? planned : null,
         proposed: count("author.page_proposed"),
         dropped: count("author.page_dropped"),
-        skipped: count("author.page_skipped"),
-        skipReasons: [...new Set(runLogs.filter((l) => l.action === "author.page_skipped").map((l) => String(l.details?.reason)))],
+        skipped: Math.max(skipEvents.length, typeof finishedSkips === "number" ? finishedSkips : 0),
+        skipReasons: skipEvents.length
+          ? [...new Set(skipEvents.map((l) => String(l.details?.reason)))]
+          : typeof finishedSkips === "number" && finishedSkips > 0
+            ? ["not recorded per page for this run"]
+            : [],
         current: authorState === "running" ? (runLogs.findLast((l) => l.action === "author.page_started")?.details?.path as string | undefined) ?? null : null,
         tokens: run ? run.inputTokens + run.outputTokens : 0,
         costUsd: run ? Number(run.costUsd) : 0,
