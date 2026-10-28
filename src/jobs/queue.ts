@@ -21,13 +21,22 @@ export function getBoss(): Promise<PgBoss> {
   return starting;
 }
 
-async function ensureQueues(b: PgBoss) {
+/**
+ * 🔴 pg-boss's default 900s limit expired a 20-minute author run and queued a retry while the
+ * first run kept going (it cannot cancel the handler). A run here is bounded by its token budget.
+ */
+export const JOB_EXPIRY_SECONDS = { [QUEUES.syncRepo]: 60 * 60, [QUEUES.authorWiki]: 2 * 60 * 60 } as const;
+
+export async function ensureQueues(b: PgBoss) {
   const retry = { retryLimit: 5, retryDelay: 10, retryBackoff: true, retryDelayMax: 600 };
   await b.createQueue(QUEUES.pollRepos, { policy: "singleton" });
   // stately + singletonKey(repoId): at most one queued and one active sync per repo,
   // so a burst of merges coalesces and the job always syncs the latest desired_sha.
-  await b.createQueue(QUEUES.syncRepo, { policy: "stately", ...retry });
-  await b.createQueue(QUEUES.authorWiki, { policy: "stately", ...retry });
+  for (const [name, expireInSeconds] of Object.entries(JOB_EXPIRY_SECONDS)) {
+    await b.createQueue(name, { policy: "stately", ...retry, expireInSeconds });
+    // createQueue leaves an existing queue as it was, so databases from before this fix need the update.
+    await b.updateQueue(name, { expireInSeconds });
+  }
   await b.createQueue(QUEUES.indexPage, { ...retry });
   await b.createQueue(QUEUES.lintWiki, { policy: "singleton" });
 }
