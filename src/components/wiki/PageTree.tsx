@@ -14,7 +14,9 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  SearchCode,
   Trash2,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -156,6 +158,12 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
         </SideLink>
         <SideLink href="/jobs" active={pathname === "/jobs"} icon={<Activity className="size-4" />}>
           Jobs
+        </SideLink>
+        <SideLink href="/pipeline" active={pathname === "/pipeline"} icon={<Workflow className="size-4" />}>
+          Pipeline
+        </SideLink>
+        <SideLink href="/explain" active={pathname === "/explain"} icon={<SearchCode className="size-4" />}>
+          How search works
         </SideLink>
       </div>
     </nav>

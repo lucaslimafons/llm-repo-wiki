@@ -14,6 +14,10 @@ export const queryKeys = {
   },
   jobs: {
     overview: () => ["jobs", "overview"] as const,
+    timeline: (repoId: string | null, run: string | null) => ["jobs", "timeline", repoId, run] as const,
+  },
+  explain: {
+    search: (query: string) => ["explain", "search", query] as const,
   },
   chat: {
     all: ["chat"] as const,

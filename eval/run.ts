@@ -16,6 +16,7 @@ import { syncRepo } from "@/ingest/sync";
 import { env, openRouterKey } from "@/lib/env";
 import type { SearchHit } from "@/core/contracts";
 import { searchWithMode, type FusionWeights, type SearchMode } from "@/search";
+import { RERANK_POOL } from "@/search/constants";
 import { rerankHits } from "@/search/rerank";
 import { providerPrivacy } from "@/lib/openrouter-privacy";
 
@@ -28,7 +29,6 @@ const goldenSchema = z.object({
 const K_RECALL = 5;
 const K_MRR = 10;
 /** Candidates handed to the reranker. */
-const RERANK_POOL = 30;
 
 type Strategy = { name: string; mode: SearchMode; weights?: FusionWeights; rerank?: string };
 

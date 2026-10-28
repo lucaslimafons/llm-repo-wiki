@@ -3,15 +3,13 @@ import { z } from "zod";
 import type { SearchHit, SearchInput, SourceHit, WikiHit } from "@/core/contracts";
 import { db as defaultDb, type Db } from "@/db/client";
 import { chunks, repos, revisionSources, wikiChunks } from "@/db/schema";
-import { repoFullNameSchema } from "@/github/repo-name";
+import { repoFullNameSchema, type RepoRef } from "@/github/repo-name";
 import { createOpenRouterEmbedder, toVector, type Embedder } from "@/ingest/embedder";
 import { env, openRouterKey } from "@/lib/env";
+import { CANDIDATES, RRF_K } from "./constants";
 import { pagePaths } from "./page-path";
 import { providerPrivacy } from "@/lib/openrouter-privacy";
 
-export const RRF_K = 60;
-/** Candidates per retriever before fusion. */
-export const CANDIDATES = 50;
 
 export type SearchMode = "hybrid" | "vector" | "fts";
 export type SearchDeps = { db: Db; embedder: Embedder };
@@ -28,7 +26,7 @@ const inputSchema = z.object({
 });
 
 let defaults: SearchDeps | undefined;
-function defaultDeps(): SearchDeps {
+export function defaultDeps(): SearchDeps {
   defaults ??= {
     db: defaultDb(),
     embedder: createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL, ...providerPrivacy() }),
@@ -48,7 +46,36 @@ export async function searchWithMode(
   deps: SearchDeps,
   weights: FusionWeights = EQUAL_WEIGHTS,
 ): Promise<SearchHit[]> {
-  const { query, scope, repo, limit } = inputSchema.parse(input);
+  const parsed = inputSchema.parse(input);
+  const { rows } = await rank(parsed, parsed.limit, mode, deps, weights);
+  return hydrate(deps.db, rows);
+}
+
+/** One fused row, with where it sat in each list: what the /explain view draws. */
+export type RankedRow = {
+  kind: "source" | "wiki";
+  id: string;
+  score: number;
+  vecRank: number | null;
+  ftsRank: number | null;
+  /** Cosine distance (0 = same direction). */
+  vecDistance: number | null;
+  /** ts_rank_cd, higher is better. */
+  ftsScore: number | null;
+};
+
+/**
+ * Runs the hybrid query and keeps each list's rank and raw score. `limit` may exceed the tool's
+ * cap: the explainer asks for every candidate so it can show both lists in full.
+ */
+export async function rank(
+  input: { query: string; scope: SearchInput["scope"]; repo?: RepoRef },
+  limit: number,
+  mode: SearchMode,
+  deps: SearchDeps,
+  weights: FusionWeights = EQUAL_WEIGHTS,
+): Promise<{ rows: RankedRow[]; vector: number[] | null }> {
+  const { query, scope, repo } = input;
   const { db, embedder } = deps;
 
   let repoId: string | null = null;
@@ -57,7 +84,7 @@ export async function searchWithMode(
       .select({ id: repos.id })
       .from(repos)
       .where(and(sql`lower(${repos.owner}) = lower(${repo.owner})`, sql`lower(${repos.name}) = lower(${repo.name})`));
-    if (!row) return [];
+    if (!row) return { rows: [], vector: null };
     repoId = row.id;
   }
 
@@ -65,11 +92,30 @@ export async function searchWithMode(
   const ranked = await db.transaction(async (tx) => {
     // Without the iterative scan, a selective filter can leave HNSW with too few rows.
     await tx.execute(sql`set local hnsw.iterative_scan = relaxed_order`);
-    return tx.execute<{ kind: "source" | "wiki"; id: string; score: number }>(
-      fusedQuery({ query, vector, model: embedder.model, scope, repoId, limit, mode, weights }),
-    );
+    return tx.execute<{
+      kind: "source" | "wiki";
+      id: string;
+      score: number;
+      vec_rank: number | null;
+      fts_rank: number | null;
+      vec_d: number | null;
+      fts_d: number | null;
+    }>(fusedQuery({ query, vector, model: embedder.model, scope, repoId, limit, mode, weights }));
   });
-  return hydrate(db, ranked.map((r) => ({ ...r, score: Number(r.score) })));
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const rows = ranked.map((r) => {
+    const ftsD = num(r.fts_d);
+    return {
+      kind: r.kind,
+      id: r.id,
+      score: Number(r.score),
+      vecRank: num(r.vec_rank),
+      ftsRank: num(r.fts_rank),
+      vecDistance: num(r.vec_d),
+      ftsScore: ftsD === null ? null : -ftsD,
+    };
+  });
+  return { rows, vector };
 }
 
 type QueryParts = {
@@ -118,16 +164,17 @@ function fusedQuery(p: QueryParts): SQL {
   // Each list is ranked by its own score; fusion only ever sees ranks, so the scales never mix.
   return sql`
     with vec as (
-      select kind, id, row_number() over (order by d) as r
+      select kind, id, d, row_number() over (order by d) as r
       from (${union(vecParts)}) u order by d limit ${CANDIDATES}
     ),
     fts as (
-      select kind, id, row_number() over (order by d) as r
+      select kind, id, d, row_number() over (order by d) as r
       from (${union(ftsParts)}) u order by d limit ${CANDIDATES}
     )
     select coalesce(vec.kind, fts.kind) as kind,
            coalesce(vec.id, fts.id) as id,
-           coalesce(${p.weights.vector}::float8 / (${RRF_K} + vec.r), 0) + coalesce(${p.weights.fts}::float8 / (${RRF_K} + fts.r), 0) as score
+           coalesce(${p.weights.vector}::float8 / (${RRF_K} + vec.r), 0) + coalesce(${p.weights.fts}::float8 / (${RRF_K} + fts.r), 0) as score,
+           vec.r as vec_rank, fts.r as fts_rank, vec.d as vec_d, fts.d as fts_d
     from vec full outer join fts on vec.kind = fts.kind and vec.id = fts.id
     order by score desc, coalesce(vec.r, ${CANDIDATES + 1}), coalesce(fts.r, ${CANDIDATES + 1})
     limit ${p.limit}`;
@@ -154,7 +201,15 @@ export function tsQuery(query: string): SQL {
   return sql`regexp_replace(websearch_to_tsquery('simple', ${q})::text, ' & (?!!)', ' | ', 'g')::tsquery`;
 }
 
-async function hydrate(db: Db, ranked: { kind: "source" | "wiki"; id: string; score: number }[]): Promise<SearchHit[]> {
+type RankedRef = { kind: "source" | "wiki"; id: string; score: number };
+
+async function hydrate(db: Db, ranked: RankedRef[]): Promise<SearchHit[]> {
+  const byKey = await hydrateByKey(db, ranked);
+  return ranked.flatMap((r) => byKey.get(`${r.kind}:${r.id}`) ?? []);
+}
+
+/** Hits keyed `kind:id`: wiki hits carry their page, not the chunk, so callers that link lists need this. */
+export async function hydrateByKey(db: Db, ranked: RankedRef[]): Promise<Map<string, SearchHit>> {
   const srcIds = ranked.filter((r) => r.kind === "source").map((r) => r.id);
   const wikiIds = ranked.filter((r) => r.kind === "wiki").map((r) => r.id);
 
@@ -187,7 +242,7 @@ async function hydrate(db: Db, ranked: { kind: "source" | "wiki"; id: string; sc
   const src = new Map(srcRows.map((r) => [r.id, r]));
   const wiki = new Map(wikiRows.map((r) => [r.id, r]));
 
-  const hits: SearchHit[] = [];
+  const hits = new Map<string, SearchHit>();
   for (const r of ranked) {
     if (r.kind === "source") {
       const c = src.get(r.id);
@@ -204,7 +259,7 @@ async function hydrate(db: Db, ranked: { kind: "source" | "wiki"; id: string; sc
         content: c.content,
         score: r.score,
       };
-      hits.push(hit);
+      hits.set(`source:${r.id}`, hit);
     } else {
       const w = wiki.get(r.id);
       if (!w) continue;
@@ -216,7 +271,7 @@ async function hydrate(db: Db, ranked: { kind: "source" | "wiki"; id: string; sc
         content: w.content,
         score: r.score,
       };
-      hits.push(hit);
+      hits.set(`wiki:${r.id}`, hit);
     }
   }
   return hits;

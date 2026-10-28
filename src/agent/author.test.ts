@@ -221,6 +221,25 @@ describe("author-wiki: grounding", () => {
     expect(out.rejected).toBe(1);
   });
 
+  it("logs each proposal's stripped citations and the spend so far, for the pipeline view", async () => {
+    const invented = `source:acme/api/src/secret.ts#L1-L5@${SHA}`;
+    const mixed = () => ({ bodyMd: `Real [a](${cite("src/server.ts")}). Made up [b](${invented}).`, citations: [] });
+    const { d } = deps(authorModel(["Overview"], mixed));
+    await runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] });
+
+    const [proposed] = await testDb().select().from(wikiLog).where(eq(wikiLog.action, "author.page_proposed"));
+    expect(proposed.details).toMatchObject({ path: "Overview", ungrounded: 1, stripped: [invented], evidence: 1 });
+    expect(proposed.details?.tokens).toBe(300);
+    expect(proposed.details?.costUsd).toBeCloseTo(0.004, 6);
+    const [finished] = await testDb().select().from(wikiLog).where(eq(wikiLog.action, "author.finished"));
+    expect(finished.details).toMatchObject({ tokens: 300 });
+  });
+
+  it("returns the stripped hrefs alongside the count", () => {
+    const href = `source:acme/api/src/server.ts#L15-L40@${SHA}`;
+    expect(groundDraft({ bodyMd: `x [a](${href})`, citations: [] }, [hit]).stripped).toEqual([href]);
+  });
+
   it("fails loudly on an empty outline instead of succeeding with no pages", async () => {
     const { d } = deps(authorModel([], goodDraft));
     await expect(runAuthorJob(d, { repoId, fromSha: null, toSha: SHA, changedPaths: [] })).rejects.toThrow("outline came back empty");
