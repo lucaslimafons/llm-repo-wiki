@@ -59,6 +59,9 @@ Notable choices:
   `/explain` steps through retrieval for any question: the full-text and vector lists side by
   side, how RRF fuses them, an optional rerank, and an answer whose citations are grounded (kept
   or stripped). Chat search steps link there with "How was this found?".
+- **Answers Claude Code directly.** A local MCP server (`pnpm mcp`) gives Claude Code, or any
+  MCP client, the same search over every indexed repo, plus the wiki pages and how fresh the
+  index is. See [Use it from Claude Code](#use-it-from-claude-code-mcp).
 - **Organizes pages as a tree.** Any page can have subpages, as in Notion, Confluence or Azure
   DevOps wikis. `pnpm export` writes the accepted wiki as plain markdown that renders on GitHub: a
   `slug.md` per page, a `README.md` for each page with subpages, and a root index.
@@ -114,7 +117,9 @@ its pages under **Proposals**.
 | `pnpm export --out <dir>` | Write the accepted wiki as a folder of markdown that renders on GitHub |
 | `pnpm eval` | Retrieval eval: 8 search strategies, recall@5 and MRR |
 | `pnpm bench:chat`, `pnpm bench:author` | Compare models on the real chat agent and author job |
-| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 298 tests against a real Postgres, plus checks |
+| `pnpm mcp` / `pnpm mcp:smoke "question"` | Run the MCP server over stdio / check it end to end as a client would |
+| `pnpm bench:mcp` | Claude Code with vs. without the MCP server: tokens, turns, time, accuracy |
+| `pnpm test` / `pnpm typecheck` / `pnpm lint` | 313 tests against a real Postgres, plus checks |
 
 ## Configuration
 
@@ -155,6 +160,40 @@ so a shared page such as `Overview` cites all of them. When a repo's outline nam
 repo already wrote, the author proposes an update that adds this repo's side and keeps the page's
 existing citations, instead of skipping the topic. The brief is the owner's intent, not a source:
 every fact on a page still has to cite code.
+
+## Use it from Claude Code (MCP)
+
+`pnpm mcp` starts a local [MCP](https://modelcontextprotocol.io) server over stdio, with no network
+listener. Register it once, at user scope, so it works in every repo you open:
+
+```bash
+claude mcp add --transport stdio -s user llm-repo-wiki -- pnpm --silent --dir /path/to/llm-repo-wiki mcp
+pnpm mcp:smoke "how are repositories synced"   # optional: check it the way Claude Code will call it
+```
+
+It needs the Postgres container running. Keep `pnpm worker` running too, so the index follows your
+default branches.
+
+| Tool | What it returns |
+|---|---|
+| `search_knowledge` | Ranked snippets from every repo, each with `repo/path#lines@sha`, a GitHub permalink and the wiki pages that cite the file, plus how fresh the index is |
+| `read_page` | One wiki page with citations as permalinks. A page not reviewed yet comes back labelled as an unreviewed proposal |
+| `list_pages` | The page tree |
+| `repo_status` | Per repo: the indexed commit vs. the newest head the worker saw, sync and authoring state |
+| `sync_repo` | Queues a re-index, like the Sync button. The only tool that changes anything |
+
+The server's instructions tell Claude when to use the index: questions that span files or repos,
+or getting oriented. They also say when to grep instead: exact strings, every occurrence, or before
+editing a file.
+
+**Whether it saves anything is measured, not assumed.** `pnpm bench:mcp` runs each question through
+`claude -p` twice: once with only grep and read, and once with the MCP tools as well. It compares
+tokens, turns, time and how many expected files the answer names. It runs on your Claude Code
+login; no API key is needed. Copy `eval/mcp-bench.example.json` to `eval/mcp-bench.local.json`
+first. That file and `eval/results/` are gitignored, because both quote your repos.
+
+Your questions are answered by Claude Code, on your own Claude plan. The wiki only retrieves, at
+the cost of one query embedding per search.
 
 ## Private repositories
 
