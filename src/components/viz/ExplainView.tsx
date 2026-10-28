@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Equal, Loader2, Search, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Equal, Loader2, PinOff, Search, Sparkles } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { MAX_ANSWER_CHUNKS } from "@/agent/explain-answer-limits";
 import { explainAnswerSchema, searchExplanationSchema } from "@/core/api-schemas";
@@ -40,18 +40,18 @@ const rrfTerm = (k: number, r: number | null) => (r === null ? null : `1/(${k}+$
 export function ExplainView({ initialQuery }: { initialQuery: string }) {
   const [input, setInput] = useState(initialQuery);
   const [query, setQuery] = useState(initialQuery);
-  const [rerank, setRerank] = useState(false);
   const [step, setStep] = useState(0);
   const [hover, setHover] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
 
   const search = useQuery({
-    queryKey: queryKeys.explain.search(query, rerank),
-    queryFn: () => fetchExplain(query, rerank),
+    queryKey: queryKeys.explain.search(query),
+    queryFn: () => fetchExplain(query, false),
     enabled: query.length > 0,
     staleTime: Infinity,
-    placeholderData: (prev) => prev,
   });
+  // Paid and optional: its own request, so a failure stays in the rerank panel instead of blanking the board.
+  const rerank = useMutation({ mutationFn: () => fetchExplain(query, true) });
   const answer = useMutation({
     mutationFn: (keys: string[]) => fetchJson("/api/explain/answer", explainAnswerSchema, post({ query, keys })),
   });
@@ -61,15 +61,16 @@ export function ExplainView({ initialQuery }: { initialQuery: string }) {
     const q = input.trim().slice(0, 500);
     if (!q) return;
     setQuery(q);
-    setRerank(false);
+    rerank.reset();
     setStep(0);
     setPinned(null);
     answer.reset();
     window.history.replaceState(null, "", `/explain?q=${encodeURIComponent(q)}`);
   };
 
-  const x = search.data;
-  const focus = hover ?? pinned;
+  const x = rerank.data ?? search.data;
+  // A clicked chunk stays put: scrolling to its details must not let hover swap it out.
+  const focus = pinned ?? hover;
   const answerList = x ? (x.reranked?.items ?? x.fused).slice(0, MAX_ANSWER_CHUNKS) : [];
 
   return (
@@ -109,7 +110,7 @@ export function ExplainView({ initialQuery }: { initialQuery: string }) {
           <div className="board overflow-x-auto rounded-xl border border-line p-5">
             <QueryCard x={x} />
             <Note x={x} step={step} />
-            {step === 4 && <RerankPanel x={x} loading={search.isFetching} onRerank={() => setRerank(true)} />}
+            {step === 4 && <RerankPanel x={x} loading={rerank.isPending} error={rerank.error} onRerank={() => rerank.mutate()} />}
             {step === 5 && (
               <AnswerPanel
                 count={answerList.length}
@@ -122,7 +123,7 @@ export function ExplainView({ initialQuery }: { initialQuery: string }) {
               <Lists x={x} step={step} focus={focus} setHover={setHover} pinned={pinned} setPinned={setPinned} />
             </div>
           </div>
-          {focus && step >= 1 && <Detail x={x} itemKey={focus} />}
+          {focus && step >= 1 && <Detail x={x} itemKey={focus} pinned={pinned !== null} onUnpin={() => setPinned(null)} />}
         </>
       )}
     </div>
@@ -331,7 +332,7 @@ function Note({ x, step }: { x: SearchExplanation; step: number }) {
       climber && climber.rise > 0
         ? ` Here ${label(climber.i)} was #${Math.max(climber.i.ftsRank!, climber.i.vecRank!)} in one list and is #${climber.i.fusedRank} after fusion.`
         : ""
-    } Green outlines mark chunks both lists found; hover one to follow it.`,
+    } Green outlines mark chunks both lists found; hover one to follow it, click it to keep it selected.`,
     `A reranker is a second model that reads the question and each chunk together, which is slower but more precise than comparing embeddings. In this project's eval, adding it raised recall@5 from 0.80 to 0.95. It is optional here because it is one paid call.`,
     `The model now answers from the top ${MAX_ANSWER_CHUNKS} chunks${x.reranked ? " after reranking" : ""} and must cite them. Then the same grounding check the wiki author uses runs: a citation pointing at lines the model was not given is stripped, so invented sources never render as links.${
       top ? ` The best chunk is ${label(top)}.` : ""
@@ -345,10 +346,18 @@ function Note({ x, step }: { x: SearchExplanation; step: number }) {
   );
 }
 
-function RerankPanel({ x, loading, onRerank }: { x: SearchExplanation; loading: boolean; onRerank: () => void }) {
+function RerankPanel({ x, loading, error, onRerank }: { x: SearchExplanation; loading: boolean; error: Error | null; onRerank: () => void }) {
+  if (!x.rerankAvailable)
+    return (
+      <p className="mt-4 max-w-3xl rounded-lg border border-dashed border-line bg-surface p-3 text-sm text-muted">
+        Rerank is off here. OPENROUTER_ZDR keeps your code on providers that store nothing, and every rerank model on OpenRouter runs on a provider
+        endpoint without that guarantee. The fused list above is what search uses today.
+      </p>
+    );
   if (!x.reranked)
     return (
       <div className="mt-4">
+        {error && <p className="mb-2 text-sm break-words text-danger">{error.message}</p>}
         <button
           type="button"
           onClick={onRerank}
@@ -442,13 +451,22 @@ function AnswerPanel({ count, reranked, state, onGenerate }: { count: number; re
   );
 }
 
-function Detail({ x, itemKey }: { x: SearchExplanation; itemKey: string }) {
+function Detail({ x, itemKey, pinned, onUnpin }: { x: SearchExplanation; itemKey: string; pinned: boolean; onUnpin: () => void }) {
   const i = [...x.fused, ...x.fts, ...x.vector, ...(x.reranked?.items ?? [])].find((n) => n.key === itemKey);
   if (!i) return null;
   const terms = [rrfTerm(x.rrfK, i.ftsRank), rrfTerm(x.rrfK, i.vecRank)].filter(Boolean).join(" + ");
   return (
     <div className="mt-4 rounded-lg border border-line bg-surface p-3">
-      <p className="font-mono text-sm break-all">{label(i)}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 font-mono text-sm break-all">{label(i)}</p>
+        {pinned ? (
+          <button type="button" onClick={onUnpin} className="flex shrink-0 items-center gap-1 rounded border border-line px-2 py-0.5 text-xs text-muted hover:text-foreground">
+            <PinOff className="size-3.5" /> Unpin
+          </button>
+        ) : (
+          <span className="shrink-0 text-xs text-muted">Click a chunk to keep it here</span>
+        )}
+      </div>
       <p className="mt-0.5 text-xs text-muted">{origin(i)}</p>
       <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-4">
         <Fact term="Full-text rank" value={i.ftsRank ? `#${i.ftsRank} · ${i.ftsScore?.toFixed(3)}` : "not found"} />

@@ -251,6 +251,7 @@ export const searchExplanationSchema: z.ZodType<SearchExplanation> = z.object({
   reranked: z
     .object({ model: z.string(), costUsd: z.number(), items: z.array(z.object({ ...explainItemShape, rerankScore: z.number() })) })
     .nullable(),
+  rerankAvailable: z.boolean(),
 });
 
 export const explainAnswerSchema: z.ZodType<ExplainAnswer> = z.object({

@@ -17,7 +17,7 @@ export const queryKeys = {
     timeline: (repoId: string | null, run: string | null) => ["jobs", "timeline", repoId, run] as const,
   },
   explain: {
-    search: (query: string, rerank: boolean) => ["explain", "search", query, rerank] as const,
+    search: (query: string) => ["explain", "search", query] as const,
   },
   chat: {
     all: ["chat"] as const,

@@ -42,13 +42,20 @@ export type SearchExplanation = {
   vector: ExplainItem[];
   fused: ExplainItem[];
   reranked: { model: string; costUsd: number; items: (ExplainItem & { rerankScore: number })[] } | null;
+  /** False while OPENROUTER_ZDR is on: no rerank model on OpenRouter has a zero-retention endpoint. */
+  rerankAvailable: boolean;
 };
+
+export const RERANK_NEEDS_RETENTION =
+  "Rerank is off because OPENROUTER_ZDR is on: every rerank model on OpenRouter runs on a provider endpoint without zero data retention.";
 
 const keyOf = (r: { kind: string; id: string }) => `${r.kind}:${r.id}`;
 
 /** Hybrid search with its working shown: both lists, their ranks, and the fused order. */
 export async function explainSearch(input: ExplainInput, deps: SearchDeps = defaultDeps()): Promise<SearchExplanation> {
   const { query, rerank: withRerank } = explainInputSchema.parse(input);
+  const rerankAvailable = !env().OPENROUTER_ZDR;
+  if (withRerank && !rerankAvailable) throw new Error(RERANK_NEEDS_RETENTION);
   const { rows, vector } = await rank({ query, scope: "all" }, CANDIDATES * 2, "hybrid", deps);
 
   const fts = rows.filter((r) => r.ftsRank !== null).sort((a, b) => a.ftsRank! - b.ftsRank!).slice(0, EXPLAIN_LIST_SIZE);
@@ -109,5 +116,6 @@ export async function explainSearch(input: ExplainInput, deps: SearchDeps = defa
     vector: items(vec),
     fused: items(rows.slice(0, EXPLAIN_LIST_SIZE)),
     reranked,
+    rerankAvailable,
   };
 }

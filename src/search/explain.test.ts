@@ -58,6 +58,15 @@ describe("explainSearch", () => {
     expect(x.fused.map((i) => (i.hit.kind === "source" ? i.hit.chunkId : null))).toEqual(chat.map((h) => (h.kind === "source" ? h.chunkId : null)));
   });
 
+  it("refuses rerank before any call while zero data retention is on, and says so", async () => {
+    await fixture();
+    const x = await explainSearch({ query: QUERY }, { db, embedder });
+    expect(x.rerankAvailable).toBe(false);
+    const calls = embedder.calls;
+    await expect(explainSearch({ query: QUERY, rerank: true }, { db, embedder })).rejects.toThrow("OPENROUTER_ZDR");
+    expect(embedder.calls).toBe(calls);
+  });
+
   it("grounds the answer: a citation to a chunk it was given survives, an invented one is stripped", async () => {
     const { both } = await fixture();
     const good = `source:acme/auth/src/auth.ts#L1-L1@${SHA}`;

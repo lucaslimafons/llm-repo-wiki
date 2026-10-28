@@ -129,7 +129,7 @@ at start.
 | `CHAT_MODEL` | `anthropic/claude-haiku-5.5` | The model you chat with |
 | `AUTHOR_MODEL` | `anthropic/claude-haiku-5.5` | The model that writes and updates pages in the background |
 | `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Must return 1,536 dimensions. Changing it means re-embedding everything (`pnpm db:reset`, then add the repos again) |
-| `RERANK_MODEL` | `cohere/rerank-4-pro` | Used only by the optional rerank step on `/explain`, one paid call per click |
+| `RERANK_MODEL` | `cohere/rerank-4-pro` | Used only by the optional rerank step on `/explain`, one paid call per click. Off while `OPENROUTER_ZDR=true`: no rerank model on OpenRouter has a zero-retention endpoint |
 | `OPENROUTER_ZDR` | `true` | Every model call requires a zero-data-retention endpoint. Keep it on for private code |
 | `POLL_INTERVAL_MINUTES` | `5` | How often the worker checks each repo for new commits |
 | `AUTHOR_TOKEN_BUDGET` | `800000` | Input + output tokens one author run may spend. When it runs out, the run stops cleanly as `budget_exceeded` and keeps the pages it wrote |
