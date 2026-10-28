@@ -42,3 +42,7 @@ next-env.d.ts
 
 # The example documents every variable and holds no secrets.
 !.env.example
+
+# MCP benchmark: questions about private repos and raw transcripts (they quote private code)
+/eval/mcp-bench.local.json
+/eval/results/

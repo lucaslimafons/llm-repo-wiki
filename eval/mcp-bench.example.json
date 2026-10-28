@@ -1,0 +1,12 @@
+{
+  "workdir": "/absolute/path/to/a/folder/holding/the/clones",
+  "addDirs": ["/absolute/path/to/owner-repo-a", "/absolute/path/to/owner-repo-b"],
+  "runs": 3,
+  "questions": [
+    {
+      "id": "sync-flow",
+      "question": "How does a repository sync decide which files to re-embed?",
+      "expect": ["owner/repo-a:src/ingest/sync.ts"]
+    }
+  ]
+}
