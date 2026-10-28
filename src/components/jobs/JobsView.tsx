@@ -5,6 +5,7 @@ import { jobsOverviewSchema } from "@/core/api-schemas";
 import type { JobsOverview } from "@/jobs/overview";
 import { fetchJson } from "@/lib/fetch-json";
 import { queryKeys } from "@/lib/query-keys";
+import { PipelineCard } from "./PipelineCard";
 
 const BUSY_POLL_MS = 3000;
 const IDLE_POLL_MS = 15000;
@@ -15,7 +16,7 @@ const MAX_DETAIL = 80;
 const fetchOverview = () => fetchJson("/api/jobs", jobsOverviewSchema);
 
 const isBusy = (o: JobsOverview) =>
-  o.repos.some((r) => r.status === "queued" || r.status === "syncing") ||
+  o.pipelines.some((p) => p.sync.state === "running" || p.sync.state === "waiting" || p.author.state === "running" || p.author.state === "waiting") ||
   o.jobs.some((j) => j.state === "created" || j.state === "active" || j.state === "retry") ||
   o.runs.some((r) => r.status === "running");
 
@@ -33,22 +34,30 @@ export function JobsView({ initial }: { initial: JobsOverview }) {
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-8">
       <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
       <p className="mt-1 mb-6 text-sm text-muted">
-        Syncs, queue jobs and agent runs, refreshed live. Total model spend: <strong>{usd(o.totalCostUsd)}</strong>
+        Each repository goes through sync, then the author agent, then your review. Refreshed live. Total model spend:{" "}
+        <strong>{usd(o.totalCostUsd)}</strong>
       </p>
       {overview.error && <p className="mb-4 text-sm text-danger">{overview.error.message}</p>}
 
-      <Section title="Repositories" empty={o.repos.length === 0}>
-        {o.repos.map((r) => (
-          <Row key={r.id} badge={r.status} main={r.fullName} meta={`${r.fileCount} files · @${r.syncedSha?.slice(0, 7) ?? "—"}`} error={r.lastError} />
-        ))}
-      </Section>
+      <section className="mb-6">
+        <h2 className="mb-2 font-medium">Pipeline</h2>
+        {o.pipelines.length === 0 ? (
+          <p className="rounded-md border border-dashed border-line p-4 text-center text-sm text-muted">No repositories yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {o.pipelines.map((p) => (
+              <PipelineCard key={p.repoId} p={p} now={now} format={{ usd, tokens, duration }} />
+            ))}
+          </ul>
+        )}
+      </section>
 
       <Section title="Agent runs" empty={o.runs.length === 0}>
         {o.runs.map((r) => (
           <Row
             key={r.id}
             badge={r.status}
-            main={`${r.kind} · ${r.model}`}
+            main={`${r.kind}${r.repo ? ` · ${r.repo}` : ""} · ${r.model}`}
             meta={`${tokens(r.inputTokens)} in · ${tokens(r.outputTokens)} out · ${usd(r.costUsd)} · ${duration(r.startedAt, r.finishedAt, now)}`}
             error={r.error}
           />
@@ -60,7 +69,7 @@ export function JobsView({ initial }: { initial: JobsOverview }) {
           <Row
             key={j.id}
             badge={j.state}
-            main={j.name}
+            main={j.repo ? `${j.name} · ${j.repo}` : j.name}
             meta={`${ago(j.createdOn, now)}${j.startedOn ? ` · ran ${duration(j.startedOn, j.completedOn, now)}` : ""}${j.retryCount ? ` · retry ${j.retryCount}` : ""}`}
             error={j.error}
           />

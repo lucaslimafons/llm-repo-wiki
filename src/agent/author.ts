@@ -276,6 +276,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
       onStepEnd: (step) => run.addStep(step),
     });
     if (plan.output.pages.length === 0) throw new Error("the outline came back empty");
+    await log(db, "author.outline", { repoId: repo.id, details: { runId: run.id, planned: Math.min(plan.output.pages.length, maxPages) } });
 
     // Pages this repo already has (e.g. from a retried run) count once, against the same budget.
     const planned = new Set<string>(existing);
@@ -316,6 +317,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
         `The page was written from the project's other repositories. Keep what it says and its citations, and add what ${repoName} contributes, citing the evidence below.`,
       ], `extend with ${repoName}: ${purpose}`);
     }
+    await log(db, "author.page_started", { repoId: repo.id, details: { runId: run.id, path } });
     const parentPath = parentOf(path);
     const parent = parentPath ? await store.getPage({ path: parentPath }) : null;
     if (parentPath && !parent) return drop(path, `parent "${parentPath}" was not written`);
@@ -344,6 +346,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
   async function writeIncremental(citing: PageView[]) {
     const changed = new Set(payload.changedPaths);
     const affected = citing.filter((p) => p.stale || p.citations.some((c) => c.repo === repoName && changed.has(c.path)));
+    await log(db, "author.outline", { repoId: repo.id, details: { runId: run.id, planned: Math.min(affected.length, maxPages) } });
     for (const page of affected.slice(0, maxPages)) {
       if (overBudget()) {
         result.status = "budget_exceeded";
@@ -417,6 +420,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
       result.skipped.push({ path: page.path, reason: "already proposed for this sha" });
       return;
     }
+    await log(db, "author.page_started", { repoId: repo.id, details: { runId: run.id, path: page.path } });
     const hits = await gather(queries);
     if (hits.length === 0) {
       await drop(page.path, "no evidence found for the update", pageId);
