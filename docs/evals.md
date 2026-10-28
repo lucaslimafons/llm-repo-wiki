@@ -18,7 +18,7 @@ chat questions at $0.003 each.
 | Retrieval | hybrid + `cohere/rerank-4-pro` | Recall@5 0.95 vs 0.85 vector-only and 0.80 plain hybrid; +$0.0025 and about +0.7 s per search |
 
 The reranker is measured here but not yet used by the app; the app searches with plain hybrid RRF
-today. See [Reranking](../README.md#reranking-measured-not-yet-on) in the README.
+today. See [Retrieval and reranking](models.md#retrieval-and-reranking).
 
 The cheapest models failed in ways a price list doesn't show:
 

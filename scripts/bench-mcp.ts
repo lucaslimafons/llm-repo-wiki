@@ -23,7 +23,8 @@ type Arm = "grep" | "mcp";
 
 /** Pre-registered bar (issue #13): ship it as the recommended setup only if this holds. */
 const BAR = { maxTokenRatio: 0.7, maxRecallDrop: 0.05 };
-const READ_TOOLS = ["Read", "Grep", "Glob"];
+// Read, Grep and Glob are NOT listed: an explicit allow grants them everywhere, and a run then
+// wanders into sibling clones. Left to the default, they work only inside workdir + addDirs.
 const MCP_TOOLS = ["search_knowledge", "read_page", "list_pages", "repo_status"].map((t) => `mcp__llm-repo-wiki__${t}`);
 // Edits, shell, web and subagents would make the arms incomparable; sync_repo stays out of a measurement.
 const DENIED = ["Edit", "Write", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Agent", "Task", "mcp__llm-repo-wiki__sync_repo"];
@@ -94,8 +95,7 @@ function runOnce(config: Config, q: Config["questions"][number], arm: Arm, run: 
     "--strict-mcp-config",
     "--mcp-config",
     mcpConfig,
-    "--allowedTools",
-    ...(arm === "mcp" ? [...READ_TOOLS, ...MCP_TOOLS] : READ_TOOLS),
+    ...(arm === "mcp" ? ["--allowedTools", ...MCP_TOOLS] : []),
     "--disallowedTools",
     ...DENIED,
     ...config.addDirs.flatMap((d) => ["--add-dir", d]),
