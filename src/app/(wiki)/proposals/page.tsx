@@ -6,7 +6,7 @@ import { PageFallback } from "@/app/(wiki)/fallback";
 
 async function ProposalsPageContent() {
   await connection();
-  return <ProposalsQueue initialProposals={await wikiStore.listProposals()} />;
+  return <ProposalsQueue initialProposals={await wikiStore.listProposalSummaries()} />;
 }
 
 export default function ProposalsPage() {

@@ -27,6 +27,9 @@ export type RepoPipeline = {
     planned: number | null;
     proposed: number;
     dropped: number;
+    /** Planned pages it left alone, e.g. already written or waiting for review; reasons below. */
+    skipped: number;
+    skipReasons: string[];
     current: string | null;
     tokens: number;
     costUsd: number;
@@ -127,6 +130,8 @@ export async function getRepoPipelines(db: Db): Promise<{ pipelines: RepoPipelin
         planned: typeof planned === "number" ? planned : null,
         proposed: count("author.page_proposed"),
         dropped: count("author.page_dropped"),
+        skipped: count("author.page_skipped"),
+        skipReasons: [...new Set(runLogs.filter((l) => l.action === "author.page_skipped").map((l) => String(l.details?.reason)))],
         current: authorState === "running" ? (runLogs.findLast((l) => l.action === "author.page_started")?.details?.path as string | undefined) ?? null : null,
         tokens: run ? run.inputTokens + run.outputTokens : 0,
         costUsd: run ? Number(run.costUsd) : 0,

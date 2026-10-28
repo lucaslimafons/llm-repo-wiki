@@ -6,6 +6,7 @@ export const queryKeys = {
     page: (path: string) => ["wiki", "page", path] as const,
     revisions: (pageId: string) => ["wiki", "revisions", pageId] as const,
     proposals: () => ["wiki", "proposals"] as const,
+    proposal: (revisionId: string) => ["wiki", "proposal", revisionId] as const,
   },
   repos: {
     all: ["repos"] as const,

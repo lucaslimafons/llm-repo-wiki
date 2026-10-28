@@ -45,11 +45,23 @@ export type ProposalView = RevisionDetail & {
   outdated: boolean;
 };
 
+export type ProposalSummary = RevisionSummary & {
+  title: string;
+  pagePath: string;
+  isNewPage: boolean;
+  outdated: boolean;
+  citationCount: number;
+};
+
 export type WikiStoreExt = WikiStore & {
   updatePage(input: UpdatePageWithBase): Promise<{ revisionId: string }>;
   revertToRevision(revisionId: string, author: Author): Promise<{ revisionId: string }>;
   listRevisionDetails(pageId: string): Promise<RevisionDetail[]>;
-  listProposals(): Promise<ProposalView[]>;
+  /** Full proposals (bodies and the current body, for a diff), optionally for one page or revision. */
+  listProposals(filter?: { pageId?: string; revisionId?: string }): Promise<ProposalView[]>;
+  /** The review queue without bodies: cheap enough to load whole. */
+  listProposalSummaries(): Promise<ProposalSummary[]>;
+  countProposals(): Promise<number>;
   /** id → display path for every page, for resolving `wiki:` links. */
   pagePaths(): Promise<Record<string, string>>;
   /** Files whose change marked this page stale since its current revision. */
@@ -572,13 +584,19 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
       });
     },
 
-    async listProposals() {
+    async listProposals(filter = {}) {
       const rows = await loadOutline(d());
       const paths = computePaths(rows);
       const revs = await d()
         .select()
         .from(pageRevisions)
-        .where(eq(pageRevisions.status, "proposed"))
+        .where(
+          and(
+            eq(pageRevisions.status, "proposed"),
+            filter.pageId ? eq(pageRevisions.pageId, filter.pageId) : undefined,
+            filter.revisionId ? eq(pageRevisions.id, filter.revisionId) : undefined,
+          ),
+        )
         .orderBy(asc(pageRevisions.createdAt), asc(pageRevisions.id));
       const currentIds = [...new Set(rows.map((r) => r.currentRevisionId).filter((x): x is string => !!x))];
       const currents = currentIds.length
@@ -605,6 +623,43 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
           outdated: r.parentRevisionId !== page.currentRevisionId,
         };
       });
+    },
+
+    async listProposalSummaries() {
+      const rows = await loadOutline(d());
+      const paths = computePaths(rows);
+      const revs = await d()
+        .select({
+          id: pageRevisions.id,
+          pageId: pageRevisions.pageId,
+          status: pageRevisions.status,
+          authorKind: pageRevisions.authorKind,
+          reason: pageRevisions.reason,
+          createdAt: pageRevisions.createdAt,
+          title: pageRevisions.title,
+          parentRevisionId: pageRevisions.parentRevisionId,
+          citationCount: sql<number>`(select count(*)::int from ${revisionSources} where ${revisionSources.revisionId} = ${pageRevisions.id})`,
+        })
+        .from(pageRevisions)
+        .where(eq(pageRevisions.status, "proposed"))
+        .orderBy(asc(pageRevisions.createdAt), asc(pageRevisions.id));
+      return revs.map(({ parentRevisionId, title, citationCount, ...r }) => {
+        const page = rows.find((p) => p.id === r.pageId)!;
+        return {
+          ...r,
+          createdAt: r.createdAt.toISOString(),
+          title,
+          citationCount,
+          pagePath: paths.get(page.id)!,
+          isNewPage: page.currentRevisionId === null,
+          outdated: parentRevisionId !== page.currentRevisionId,
+        };
+      });
+    },
+
+    async countProposals() {
+      const [{ n }] = await d().select({ n: sql<number>`count(*)::int` }).from(pageRevisions).where(eq(pageRevisions.status, "proposed"));
+      return n;
     },
 
     async pagePaths() {

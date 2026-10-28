@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, GitPullRequestArrow, History, Pencil } from "lucide-react";
+import { AlertTriangle, History, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import type { PageView as Page } from "@/core/contracts";
@@ -14,7 +14,8 @@ export function PageView({
   page,
   wikiPaths,
   staleFiles,
-  hasProposal,
+  review,
+  sourceCount,
   startEditing,
   citations,
   children,
@@ -22,7 +23,9 @@ export function PageView({
   page: Page;
   wikiPaths: WikiPaths;
   staleFiles: string[];
-  hasProposal: boolean;
+  /** The pending proposal's review panel, when there is one. */
+  review: ReactNode;
+  sourceCount: number;
   startEditing: boolean;
   citations: ReactNode;
   children: ReactNode;
@@ -91,22 +94,12 @@ export function PageView({
             </div>
           )}
 
-          {hasProposal && (
-            <Link
-              href="/proposals"
-              className="mb-4 flex items-center gap-2 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm hover:border-accent"
-            >
-              <GitPullRequestArrow className="size-4 text-accent" />
-              {page.revisionId === null
-                ? "This page is a proposal and has not been accepted yet. Review it."
-                : "A change to this page is waiting for review."}
-            </Link>
-          )}
+          {review}
 
           {children}
 
           <section className="mt-10 border-t border-line pt-4">
-            <Disclosure summary={<span className="text-sm">{`Sources (${page.citations.length})`}</span>}>{citations}</Disclosure>
+            <Disclosure summary={<span className="text-sm">{`Sources (${sourceCount})`}</span>}>{citations}</Disclosure>
           </section>
           <p className="mt-6 text-xs text-muted">Updated {page.updatedAt.slice(0, 16).replace("T", " ")} UTC</p>
         </>
