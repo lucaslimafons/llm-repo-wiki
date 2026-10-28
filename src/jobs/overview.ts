@@ -48,7 +48,7 @@ const LIMIT = 30;
 const iso = (d: Date | string | null) => (d === null ? null : new Date(d).toISOString());
 
 /** Per-step progress lives in the pipeline cards; the feed keeps the milestones. */
-const PROGRESS_EVENTS = ["author.page_started", "author.outline", "author.page_skipped"];
+const PROGRESS_EVENTS = ["author.page_started", "author.outline", "author.page_skipped", "sync.started", "sync.progress"];
 
 /** Everything the /jobs page shows, read live. Internal pg-boss queues and the poll tick are hidden. */
 export async function getJobsOverview(db: Db): Promise<JobsOverview> {

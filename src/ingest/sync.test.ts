@@ -75,9 +75,39 @@ describe("syncRepo", () => {
     expect(rows.find((r) => r.symbol === "Widgets > Install")).toMatchObject({ startLine: 5, endLine: 7, kind: "doc" });
     expect(await repoRow(id)).toMatchObject({ syncedSha: sha(1), status: "idle", lastError: null });
     expect(t.authored).toEqual([{ repoId: id, fromSha: null, toSha: sha(1), changedPaths: ["README.md", "src/widget.ts"] }]);
-    const [log] = await db.select().from(wikiLog);
+    const [log] = await db.select().from(wikiLog).where(eq(wikiLog.action, "repo.synced"));
     expect(log).toMatchObject({ actor: "agent", action: "repo.synced", repoId: id });
     expect(log.details).toMatchObject({ mode: "full", indexed: 2, toSha: sha(1) });
+  });
+
+  it("logs progress a pipeline view can follow, every event tied to one syncId", async () => {
+    const t = setup({ [sha(1)]: { "README.md": readme, "src/widget.ts": code } });
+    const id = await addRepo(sha(1));
+    await syncRepo(t.deps, id);
+
+    const logs = await db.select().from(wikiLog).orderBy(asc(wikiLog.at));
+    expect(logs.map((l) => `${l.action}${l.details?.stage ? `:${l.details.stage}` : ""}`)).toEqual([
+      "sync.started",
+      "sync.progress:files",
+      "sync.progress:index",
+      "sync.progress:index",
+      "sync.progress:index",
+      "repo.synced",
+    ]);
+    expect(new Set(logs.map((l) => l.details?.syncId)).size).toBe(1);
+    expect(logs[0].details).toMatchObject({ fromSha: null, toSha: sha(1), mode: "full" });
+    expect(logs[1].details).toMatchObject({ downloaded: 2, kept: 2, dropped: 0, secrets: 0 });
+    expect(logs[2].details).toMatchObject({ done: 0, total: 2 });
+    expect(logs[4].details).toMatchObject({ done: 2, total: 2, indexed: 2, failed: 0 });
+  });
+
+  it("logs sync.failed with the run's syncId when a sync throws", async () => {
+    const t = setup({ [sha(1)]: { "README.md": readme } });
+    const id = await addRepo(sha(9));
+    await expect(syncRepo(t.deps, id)).rejects.toThrow("no commit");
+    const logs = await db.select().from(wikiLog).orderBy(asc(wikiLog.at));
+    expect(logs.map((l) => l.action)).toEqual(["sync.started", "sync.failed"]);
+    expect(logs[1].details).toMatchObject({ syncId: logs[0].details?.syncId, error: expect.stringContaining("no commit") });
   });
 
   it("is a no-op when synced_sha already equals desired_sha", async () => {

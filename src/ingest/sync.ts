@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, ne, notInArray, or, sql } from "drizzle-orm";
 import type { JobPayloads, QUEUES } from "@/core/contracts";
 import type { Db } from "@/db/client";
@@ -61,6 +62,8 @@ async function runSync(deps: SyncDeps, repoId: string): Promise<SyncResult> {
   if (!repo) return { status: "missing" };
   const ref: RepoRef = { owner: repo.owner, name: repo.name };
   await db.update(repos).set({ status: "syncing", lastError: null }).where(eq(repos.id, repoId));
+  // Ties this run's progress events together for the pipeline view (live and replay).
+  const syncId = randomUUID();
 
   try {
     let toSha = repo.desiredSha;
@@ -76,7 +79,8 @@ async function runSync(deps: SyncDeps, repoId: string): Promise<SyncResult> {
     }
 
     const compared = fromSha ? await github.compare(ref, fromSha, toSha) : ({ tooLarge: true } as const);
-    const work = new Work(deps, repoId, `${repo.owner}/${repo.name}`, toSha);
+    const work = new Work(deps, repoId, `${repo.owner}/${repo.name}`, toSha, syncId);
+    await work.log("sync.started", { fromSha, toSha, mode: compared.tooLarge ? "full" : "incremental" });
 
     if (compared.tooLarge) await work.full(ref);
     else await work.incremental(ref, compared.files);
@@ -107,6 +111,7 @@ async function runSync(deps: SyncDeps, repoId: string): Promise<SyncResult> {
         action: "repo.synced",
         repoId,
         details: {
+          syncId,
           fromSha,
           toSha,
           ...work.stats,
@@ -128,9 +133,22 @@ async function runSync(deps: SyncDeps, repoId: string): Promise<SyncResult> {
       .update(repos)
       .set({ status: "error", lastError: (err as Error).message.slice(0, 2000) })
       .where(eq(repos.id, repoId));
+    await logProgress(db, repoId, "sync.failed", { syncId, error: (err as Error).message.slice(0, 500) });
     throw err;
   }
 }
+
+/** Progress is for watching, never load-bearing: a failed write is logged and the sync carries on. */
+async function logProgress(db: Db, repoId: string, action: string, details: Record<string, unknown>) {
+  try {
+    await db.insert(wikiLog).values({ actor: "agent", action, repoId, details });
+  } catch (err) {
+    console.warn(`[sync] could not log ${action} for ${repoId}:`, (err as Error).message);
+  }
+}
+
+/** Index progress is logged about this many times per run, plus the first and last task. */
+const PROGRESS_STEPS = 20;
 
 type Failure = { path: string; message: string };
 type Task = { path: string; run: () => Promise<void> };
@@ -157,7 +175,17 @@ class Work {
     private repoId: string,
     private repoName: string,
     private sha: string,
+    private syncId: string,
   ) {}
+
+  log(action: string, details: Record<string, unknown>) {
+    return logProgress(this.deps.db, this.repoId, action, { syncId: this.syncId, ...details });
+  }
+
+  private logFiles(downloaded: number, kept: number, dropped: DroppedFile[]) {
+    const secrets = dropped.filter((d) => d.reason === "secret").length;
+    return this.log("sync.progress", { stage: "files", downloaded, kept, dropped: dropped.length, secrets });
+  }
 
   /** First sync, or compare was too large: hash-reconcile every file against source_files. */
   async full(ref: RepoRef) {
@@ -165,6 +193,7 @@ class Work {
     const raw = await this.deps.github.downloadTarball(ref, this.sha, acceptTarEntry);
     const { files, dropped } = prepareFiles(raw);
     this.noteDropped(dropped);
+    await this.logFiles(raw.size, files.size, dropped);
     const existing = await this.existingFiles();
     const tasks: Task[] = [];
     for (const path of existing.keys()) if (!files.has(path)) tasks.push({ path, run: () => this.remove(path) });
@@ -182,6 +211,7 @@ class Work {
     // .gitattributes rode along to classify linguist paths; index it only if it changed.
     if (!wanted.has(".gitattributes")) files.delete(".gitattributes");
     this.noteDropped(dropped);
+    await this.logFiles(raw.size, files.size, dropped);
     const existing = await this.existingFiles();
 
     const tasks: Task[] = [];
@@ -255,6 +285,11 @@ class Work {
   /** Runs tasks with bounded concurrency; a failed file is recorded and the rest carry on. */
   private async run(tasks: Task[]) {
     let next = 0;
+    let done = 0;
+    const every = Math.max(1, Math.ceil(tasks.length / PROGRESS_STEPS));
+    const progress = () =>
+      this.log("sync.progress", { stage: "index", done, total: tasks.length, indexed: this.stats.indexed, embedded: this.stats.embedded, failed: this.failures.length });
+    await progress();
     const worker = async () => {
       while (next < tasks.length) {
         const i = next++;
@@ -263,9 +298,12 @@ class Work {
         } catch (err) {
           this.failures.push({ path: tasks[i].path, message: (err as Error).message });
         }
+        done++;
+        if (done % every === 0 && done < tasks.length) await progress();
       }
     };
     await Promise.all(Array.from({ length: Math.min(this.deps.concurrency ?? 4, tasks.length) }, worker));
+    if (tasks.length) await progress();
   }
 
   private async remove(path: string) {
