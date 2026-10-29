@@ -15,7 +15,7 @@ chat with the wiki, and the chat can edit it too.
 
 ![Adding pmndrs/zustand to a new wiki: the sync pipeline runs stage by stage, the author agent proposes pages, and the Overview proposal opens with its citations](docs/img/demo.gif)
 
-*A new wiki for [pmndrs/zustand](https://github.com/pmndrs/zustand): first sync, the author writing pages, then reviewing a proposal. Sped up; about 4 minutes in real time.*
+*A new wiki for [pmndrs/zustand](https://github.com/pmndrs/zustand): first sync, the author writing pages, then reviewing a proposal. Sped up from a 2-minute recording.*
 
 This is a study project for learning retrieval-augmented generation (RAG) end to end. It runs
 locally with `docker compose` and `pnpm`, and is not meant to be deployed: there is no login, by
