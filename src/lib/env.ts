@@ -14,6 +14,8 @@ const envSchema = z.object({
   RERANK_MODEL: z.string().default("cohere/rerank-4-pro"),
   /** Route every model call to zero-data-retention endpoints (see src/lib/openrouter-privacy.ts). */
   OPENROUTER_ZDR: z.stringbool().default(true),
+  /** MCP search size: "full" (8 hits, long snippets) or "compact" (5 hits, one per file). See docs/mcp.md. */
+  MCP_PROFILE: z.enum(["full", "compact"]).default("compact"),
   POLL_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(5),
   /** Input + output tokens one author run may spend before it stops proposing (unset: the author's default). */
   AUTHOR_TOKEN_BUDGET: z.coerce.number().int().min(10_000).optional(),
