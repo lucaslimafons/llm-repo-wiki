@@ -1,0 +1,67 @@
+{
+  "workdir": "/tmp/llm-repo-wiki-bench/zustand",
+  "wiki": "zustand",
+  "runs": 3,
+  "questions": [
+    {
+      "id": "setstate-merge",
+      "question": "When I call setState with an object, does it replace the whole state or merge it? And what happens if the new state is a number instead of an object?",
+      "expect": ["pmndrs/zustand:src/vanilla.ts"]
+    },
+    {
+      "id": "react-rerender",
+      "question": "How does a React component find out that the store changed and re-render?",
+      "expect": ["pmndrs/zustand:src/react.ts"]
+    },
+    {
+      "id": "selector-new-object",
+      "question": "My selector returns a new object on every call and the component re-renders forever. What does the library offer to fix that, and how does it decide two results are the same?",
+      "expect": ["pmndrs/zustand:src/react/shallow.ts", "pmndrs/zustand:src/vanilla/shallow.ts"]
+    },
+    {
+      "id": "custom-equality",
+      "question": "How can I give a store hook my own equality function, and which external package does that depend on?",
+      "expect": ["pmndrs/zustand:src/traditional.ts"]
+    },
+    {
+      "id": "persist-old-shape",
+      "question": "After a page reload, what happens if the data saved in the browser was written by an older shape of my store?",
+      "expect": ["pmndrs/zustand:src/middleware/persist.ts"]
+    },
+    {
+      "id": "persist-race",
+      "question": "If loading saved state is triggered twice in a row, how does the library stop the older load from overwriting the newer one?",
+      "expect": ["pmndrs/zustand:src/middleware/persist.ts"]
+    },
+    {
+      "id": "devtools-time-travel",
+      "question": "When I jump back to an earlier state in the Redux browser extension, how does that change the store?",
+      "expect": ["pmndrs/zustand:src/middleware/devtools.ts"]
+    },
+    {
+      "id": "devtools-production",
+      "question": "Is the browser debugging integration active in a production build? How is that decided?",
+      "expect": ["pmndrs/zustand:src/middleware/devtools.ts"]
+    },
+    {
+      "id": "server-write",
+      "question": "What stops a store from being written to while a page renders on the server?",
+      "expect": ["pmndrs/zustand:src/middleware/ssrSafe.ts"]
+    },
+    {
+      "id": "listen-one-field",
+      "question": "Outside React, how can I run a callback only when one field of the state changes?",
+      "expect": ["pmndrs/zustand:src/middleware/subscribeWithSelector.ts"]
+    },
+    {
+      "id": "middleware-types",
+      "question": "How does a middleware change the store's TypeScript type, for example so that set accepts a function that mutates a draft?",
+      "expect": ["pmndrs/zustand:src/vanilla.ts", "pmndrs/zustand:src/middleware/immer.ts"]
+    },
+    {
+      "id": "reset-store",
+      "question": "How can I put a store back to the values it was created with?",
+      "expect": ["pmndrs/zustand:src/vanilla.ts"]
+    }
+  ]
+}

@@ -196,8 +196,46 @@ were 13 questions written before any run, 3 runs per arm, with the arm order rot
 - **Recall is a proxy.** It counts file names in the answer. Reading answers side by side, a
   lower-recall answer was often just as correct and cited the same lines, but named fewer files.
 
-The honest pitch, for now, is orientation and accuracy across repos, not cost. A public version of
-this eval, on public repos with the questions committed, is still to do.
+The honest pitch, for now, is orientation and accuracy across repos, not cost.
+
+### Public run: one small repo
+
+This run can be repeated. The questions and expected files are in
+[`eval/mcp-bench.zustand.json`](../eval/mcp-bench.zustand.json), committed before any run. The wiki
+indexes `pmndrs/zustand` at `v5.0.16` (`382d29c`), about 1,500 lines of TypeScript. 12 questions,
+3 runs per arm, `compact` profile, 72 runs in all.
+
+| metric (mean ± sd) | grep | mcp-compact |
+| --- | --- | --- |
+| tokens (in + out + cache) | 81,939 ± 16,118 | 82,787 ± 18,122 |
+| turns | 4.9 ± 1.2 | 5.0 ± 1.3 |
+| seconds | 17 ± 3 | 19 ± 4 |
+| expected-file recall | 0.97 | 0.97 |
+
+**Claude never called the MCP tools.** The server connected in all 36 MCP runs, and all four tools
+were in the session's tool list. Claude still answered every question with Grep and Read. The
+working folder was the repo itself, and the repo is small, so grep found the right file in one or
+two calls. There was nothing for the index to add.
+
+**So this run is close to an A/A test** (two arms that behave the same), and that makes it useful
+as a noise measurement. The overall token ratio was 1.01×. Per question, the ratio still ranged
+from 0.72× to 1.18× with no tool used. A per-question difference smaller than about 20% is noise in
+this harness, so do not read it as an effect.
+
+What this leaves open: a public run on several related repos, which is where the private run
+found the gains.
+
+To repeat it, create a wiki with the slug `zustand` on the home page, then:
+
+```bash
+pnpm repo:add pmndrs/zustand --wiki zustand   # the worker syncs it and writes the wiki
+git clone https://github.com/pmndrs/zustand /tmp/llm-repo-wiki-bench/zustand
+git -C /tmp/llm-repo-wiki-bench/zustand checkout <the synced commit>   # shown next to the repo in the sidebar
+pnpm bench:mcp --config eval/mcp-bench.zustand.json
+```
+
+The sync indexes zustand's current `main`, so the clone must check out the same commit. A newer
+commit can move a file and change the expected-file recall.
 
 ## Failure modes found
 
