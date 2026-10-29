@@ -10,3 +10,6 @@ ignoredBuiltDependencies:
   - tree-sitter-python
   - tree-sitter-rust
   - tree-sitter-typescript
+overrides:
+  # drizzle-kit's deprecated @esbuild-kit loader pins esbuild 0.18 (GHSA-67mh-4wv8-2f99).
+  "@esbuild-kit/core-utils>esbuild": ^0.25.0
