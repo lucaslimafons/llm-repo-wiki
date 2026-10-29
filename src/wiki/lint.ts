@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { pageRevisions, pages, repos, revisionSources, sourceFiles, wikiLog } from "@/db/schema";
+import { pageRevisions, pages, repos, revisionSources, sourceFiles, wikiLog, wikis } from "@/db/schema";
 import { parseWikiHref } from "@/lib/source-links";
 import { computePaths, type OutlineRow } from "./tree";
 
@@ -18,7 +18,7 @@ export function wikiLinkTargets(bodyMd: string): string[] {
 }
 
 /** Deterministic checks over published pages (an accepted current revision). No model involved. */
-export async function findLintIssues(db: Db): Promise<LintFinding[]> {
+export async function findLintIssues(db: Db, wikiId: string): Promise<LintFinding[]> {
   const rows = await db
     .select({
       id: pages.id,
@@ -31,7 +31,8 @@ export async function findLintIssues(db: Db): Promise<LintFinding[]> {
       sources: sql<number>`(select count(*)::int from revision_sources s where s.revision_id = "pages"."current_revision_id")`,
     })
     .from(pages)
-    .leftJoin(pageRevisions, eq(pageRevisions.id, pages.currentRevisionId));
+    .leftJoin(pageRevisions, eq(pageRevisions.id, pages.currentRevisionId))
+    .where(eq(pages.wikiId, wikiId));
   const outline: OutlineRow[] = rows.map((r) => ({ ...r, hasPendingProposal: false }));
   const paths = computePaths(outline);
   const published = rows.filter((r) => r.currentRevisionId !== null);
@@ -66,7 +67,7 @@ export async function findLintIssues(db: Db): Promise<LintFinding[]> {
     .innerJoin(revisionSources, eq(revisionSources.revisionId, pages.currentRevisionId))
     .innerJoin(repos, and(eq(repos.id, revisionSources.repoId), isNotNull(repos.syncedSha)))
     .leftJoin(sourceFiles, and(eq(sourceFiles.repoId, revisionSources.repoId), eq(sourceFiles.path, revisionSources.path)))
-    .where(sql`${sourceFiles.path} is null`)
+    .where(and(eq(pages.wikiId, wikiId), sql`${sourceFiles.path} is null`))
     .groupBy(pages.id, repos.owner, repos.name, revisionSources.path);
   for (const m of missing) {
     findings.push({ kind: "deleted_citation", pageId: m.pageId, path: paths.get(m.pageId)!, repo: m.repo, file: m.file });
@@ -78,14 +79,21 @@ export async function findLintIssues(db: Db): Promise<LintFinding[]> {
   );
 }
 
-/** The lint-wiki job: every finding becomes a `lint.finding` row in the append-only log. */
-export async function runLint(db: Db): Promise<LintFinding[]> {
-  const findings = await findLintIssues(db);
+/** One wiki's lint: every finding becomes a `lint.finding` row in the append-only log. */
+export async function runLint(db: Db, wikiId: string): Promise<LintFinding[]> {
+  const findings = await findLintIssues(db, wikiId);
   await db.transaction(async (tx) => {
     for (const f of findings) {
-      await tx.insert(wikiLog).values({ actor: "agent", action: "lint.finding", pageId: f.pageId, details: f });
+      await tx.insert(wikiLog).values({ wikiId, actor: "agent", action: "lint.finding", pageId: f.pageId, details: f });
     }
-    await tx.insert(wikiLog).values({ actor: "agent", action: "lint.run", details: { findings: findings.length } });
+    await tx.insert(wikiLog).values({ wikiId, actor: "agent", action: "lint.run", details: { findings: findings.length } });
   });
   return findings;
+}
+
+/** The lint-wiki job: each wiki in turn, so one wiki's findings never land in another's log. */
+export async function runLintAll(db: Db): Promise<number> {
+  let total = 0;
+  for (const { id } of await db.select({ id: wikis.id }).from(wikis)) total += (await runLint(db, id)).length;
+  return total;
 }

@@ -67,6 +67,7 @@ export type ContextResult = { summary: string | null; active: UIMessage[]; folde
  */
 export async function buildContext(input: {
   db: Db;
+  wikiId: string;
   chatId: string;
   messages: UIMessage[];
   summary: string | null;
@@ -83,7 +84,7 @@ export async function buildContext(input: {
   if (boundary === 0) return { summary: input.summary, active, folded: false };
   const toFold = active.slice(0, boundary);
 
-  const run = await startAgentRun(input.db, { kind: "chat", model: modelName(input.summaryModel) });
+  const run = await startAgentRun(input.db, { wikiId: input.wikiId, kind: "chat", model: modelName(input.summaryModel) });
   try {
     const result = await generateText({
       model: input.summaryModel,

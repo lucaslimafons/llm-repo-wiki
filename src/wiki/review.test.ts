@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Author } from "@/core/contracts";
 import { repos } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { decideProposals } from "./review";
-import { createWikiStore } from "./store";
+import { createWikiStore, type WikiStoreExt } from "./store";
 
 const human: Author = { kind: "human" };
-const store = createWikiStore(testDb(), { enqueueIndexPage: async () => {} });
+let wikiId: string;
+let store: WikiStoreExt;
 const cite = (path: string) => ({ repo: "acme/api", path, commitSha: "abc1234", startLine: 1, endLine: 5 });
 
 async function propose(title: string, parentId: string | null) {
@@ -15,7 +16,9 @@ async function propose(title: string, parentId: string | null) {
 
 beforeEach(async () => {
   await resetDb();
-  await testDb().insert(repos).values({ owner: "acme", name: "api" });
+  wikiId = await createTestWiki();
+  store = createWikiStore(testDb(), { wikiId, enqueueIndexPage: async () => {} });
+  await testDb().insert(repos).values({ wikiId, owner: "acme", name: "api" });
 });
 
 describe("proposal summaries", () => {

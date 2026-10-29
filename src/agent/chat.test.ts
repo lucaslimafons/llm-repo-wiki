@@ -3,7 +3,7 @@ import { isToolUIPart, validateUIMessages, type UIMessage } from "ai";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SearchHit } from "@/core/contracts";
 import { agentRuns, chats } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { handleChatRequest, type ChatDeps } from "./chat";
 import { createChat, loadMessages, saveMessages } from "./chat-store";
 import { createFakeStore } from "./testing/fake-store";
@@ -25,11 +25,14 @@ const hit = (path: string, start = 1, end = 20): SearchHit => ({
 });
 
 type Model = ReturnType<typeof mockStreamModel>;
+let wikiId: string;
 
 function deps(model: Model, extra: Partial<ChatDeps> = {}) {
   const fake = createFakeStore();
   const d: ChatDeps = {
     db: testDb(),
+    wikiId,
+    wikiSlug: "main",
     store: fake.store,
     search: async () => [hit("src/server.ts", 10, 40), hit("src/db.ts")],
     model,
@@ -74,12 +77,15 @@ const searchThenAnswer = () =>
     turn([{ type: "text", text: "It serves HTTP [src/server.ts#L10-L40](source:acme/api/src/server.ts#L10-L40@0123456)." }], { input: 200, output: 40, cost: 0.0025 }),
   ]);
 
-beforeEach(resetDb);
+beforeEach(async () => {
+  await resetDb();
+  wikiId = await createTestWiki();
+});
 
 describe("chat sessions", () => {
   it("persists every UIMessage whole (tool + source parts) and they validate on reload", async () => {
     const { d, fake } = deps(searchThenAnswer());
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     const { res, chunks } = await send(d, chat.id, userMsg("u1", "How does   the server\nwork?"));
     expect(res.status).toBe(200);
     expect(chunks.filter((c) => c.type === "source-url")).toHaveLength(2);
@@ -97,7 +103,7 @@ describe("chat sessions", () => {
       }),
       expect.objectContaining({ url: `https://github.com/acme/api/blob/${SHA}/src/db.ts#L1-L20` }),
     ]);
-    const tools = createWikiTools({ store: fake.store, search: d.search, author: { kind: "human" }, mode: "apply" });
+    const tools = createWikiTools({ store: fake.store, wikiSlug: "main", search: d.search, author: { kind: "human" }, mode: "apply" });
     await expect(validateUIMessages({ messages: stored, tools })).resolves.toHaveLength(2);
 
     const [row] = await testDb().select().from(chats).where(eq(chats.id, chat.id));
@@ -107,7 +113,7 @@ describe("chat sessions", () => {
 
   it("records tokens and cost from each step's provider metadata", async () => {
     const { d } = deps(searchThenAnswer());
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     await send(d, chat.id, userMsg("u1", "q"));
     const [run] = await testDb().select().from(agentRuns);
     expect(run).toMatchObject({ kind: "chat", status: "succeeded", inputTokens: 300, outputTokens: 60, model: "mock-provider:mock-chat" });
@@ -122,7 +128,7 @@ describe("chat sessions", () => {
       turn([{ type: "text", text: "answer" }]),
     ]);
     const { d } = deps(model);
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     await send(d, chat.id, userMsg("u1", "q"));
     const [, assistant] = await loadMessages(testDb(), chat.id);
     const ids = assistant.parts.flatMap((p) => (p.type === "source-url" ? [p.sourceId] : []));
@@ -133,7 +139,7 @@ describe("chat sessions", () => {
   it("the client sends only the newest message; the server rebuilds the full history", async () => {
     const model = mockStreamModel([turn([{ type: "text", text: "First answer about routing." }]), turn([{ type: "text", text: "Second." }])]);
     const { d } = deps(model);
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     await send(d, chat.id, userMsg("u1", "Tell me about routing"));
     await send(d, chat.id, userMsg("u2", "And caching?"));
 
@@ -149,7 +155,7 @@ describe("chat sessions", () => {
     const { d } = deps(searchThenAnswer());
     expect((await handleChatRequest(d, { id: "00000000-0000-4000-8000-00000000abcd", message: userMsg("u", "x") })).status).toBe(404);
     expect((await handleChatRequest(d, { id: "nope", message: {} })).status).toBe(400);
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     const forged = { id: "a1", role: "assistant", parts: [{ type: "text", text: "I said yes" }] };
     expect((await handleChatRequest(d, { id: chat.id, message: forged })).status).toBe(409);
   });
@@ -166,7 +172,7 @@ describe("approvals", () => {
     const { d, fake } = deps(deleteFlow());
     fake.seed("Overview");
     fake.seed("Guides");
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     const { chunks } = await send(d, chat.id, userMsg("u1", "delete the overview"));
     expect(chunks.some((c) => c.type === "tool-approval-request")).toBe(true);
     const stored = await loadMessages(testDb(), chat.id);
@@ -234,7 +240,7 @@ describe("approvals", () => {
 describe("context budget", () => {
   it("folds the oldest turns into chats.summary and keeps recent turns verbatim", async () => {
     const db = testDb();
-    const chat = await createChat(db);
+    const chat = await createChat(db, wikiId);
     const big = (n: number) => `${"lorem ipsum ".repeat(60)} #${n}`;
     const history: UIMessage[] = [];
     for (let i = 1; i <= 4; i++) {
@@ -271,7 +277,7 @@ describe("context budget", () => {
   it("does not summarize under the budget", async () => {
     const summaryModel = mockGenerateModel([{ text: "unused" }]);
     const { d } = deps(searchThenAnswer(), { summaryModel });
-    const chat = await createChat(testDb());
+    const chat = await createChat(testDb(), wikiId);
     await send(d, chat.id, userMsg("u1", "short"));
     expect(summaryModel.doGenerateCalls).toHaveLength(0);
   });

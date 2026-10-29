@@ -12,7 +12,7 @@ import {
   type UIMessage,
 } from "ai";
 import { z } from "zod";
-import type { SearchHit, SearchInput, WikiStore } from "@/core/contracts";
+import type { ScopedSearch, WikiStore } from "@/core/contracts";
 import type { Db } from "@/db/client";
 import {
   ChatRequestError,
@@ -35,8 +35,11 @@ export const CHAT_MAX_STEPS = 8;
 
 export type ChatDeps = {
   db: Db;
+  /** The wiki this request is in; store and search must be bound to the same one. */
+  wikiId: string;
+  wikiSlug: string;
   store: WikiStore;
-  search: (input: SearchInput) => Promise<SearchHit[]>;
+  search: ScopedSearch;
   model: LanguageModel;
   /** Cheap model for folding old turns into the summary. */
   summaryModel: LanguageModel;
@@ -82,11 +85,11 @@ function errorText(error: unknown): string {
  * from Postgres, so reopening a session (or another tab) gives the agent the same context.
  */
 export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<Response> {
-  const { db, store } = deps;
+  const { db, store, wikiId } = deps;
   const req = chatRequestSchema.safeParse(body);
   if (!req.success) return Response.json({ error: "invalid request" }, { status: 400 });
   const chatId = req.data.id;
-  const chat = await getChat(db, chatId);
+  const chat = await getChat(db, wikiId, chatId);
   if (!chat) return Response.json({ error: "chat not found" }, { status: 404 });
 
   let merged;
@@ -97,8 +100,8 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
     throw error;
   }
 
-  const run = await startAgentRun(db, { kind: "chat", model: modelName(deps.model) });
-  const tools = createWikiTools({ store, search: deps.search, author: { kind: "agent", agentRunId: run.id }, mode: "apply" });
+  const run = await startAgentRun(db, { wikiId, kind: "chat", model: modelName(deps.model) });
+  const tools = createWikiTools({ store, wikiSlug: deps.wikiSlug, search: deps.search, author: { kind: "agent", agentRunId: run.id }, mode: "apply" });
 
   try {
     const messages = await validateUIMessages<UIMessage>({ messages: merged.messages, tools });
@@ -108,6 +111,7 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
     const [context, schema, tree, project] = await Promise.all([
       buildContext({
         db,
+        wikiId,
         chatId,
         messages,
         summary: chat.summary,
@@ -117,7 +121,7 @@ export async function handleChatRequest(deps: ChatDeps, body: unknown): Promise<
       }),
       (deps.loadSchema ?? loadWikiSchema)(),
       store.listTree(),
-      getProjectContext(db),
+      getProjectContext(db, wikiId),
     ]);
 
     const agent = new ToolLoopAgent({

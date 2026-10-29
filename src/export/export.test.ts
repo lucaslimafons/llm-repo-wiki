@@ -4,12 +4,13 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Author } from "@/core/contracts";
 import { repos } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
-import { createWikiStore } from "@/wiki/store";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
+import { createWikiStore, type WikiStoreExt } from "@/wiki/store";
 import { buildExport, exportWiki, loadExportPages } from "./export";
 
 const human: Author = { kind: "human" };
-const store = createWikiStore(testDb(), { enqueueIndexPage: async () => {} });
+let wikiId: string;
+let store: WikiStoreExt;
 
 async function create(title: string, parentId: string | null, bodyMd: string, mode: "apply" | "propose" = "apply") {
   return (await store.createPage({ parentId, title, bodyMd, reason: "t", citations: [], author: human, mode })).pageId;
@@ -27,7 +28,9 @@ async function listFiles(dir: string, prefix = ""): Promise<string[]> {
 
 beforeEach(async () => {
   await resetDb();
-  await testDb().insert(repos).values({ owner: "acme", name: "api" });
+  wikiId = await createTestWiki();
+  store = createWikiStore(testDb(), { wikiId, enqueueIndexPage: async () => {} });
+  await testDb().insert(repos).values({ wikiId, owner: "acme", name: "api" });
 });
 
 describe("markdown export", () => {
@@ -53,7 +56,7 @@ describe("markdown export", () => {
     await create("Draft", arch, "pending", "propose");
     await store.movePage({ pageId: overview, newParentId: null, index: 0, author: human });
 
-    const files = buildExport(await loadExportPages(testDb()));
+    const files = buildExport(await loadExportPages(testDb(), wikiId));
     expect(Object.fromEntries(files)).toEqual({
       "README.md": [
         "# Wiki",
@@ -82,7 +85,7 @@ describe("markdown export", () => {
   it("keeps a body's own title, and never lets a page take the folder's README.md", async () => {
     const parent = await create("Guides", null, "# Guides, the long version\n\nIntro.");
     await create("README", parent, "x");
-    const files = buildExport(await loadExportPages(testDb()));
+    const files = buildExport(await loadExportPages(testDb(), wikiId));
     expect(files.get("guides/README.md")).toBe("# Guides, the long version\n\nIntro.\n");
     expect(files.get("guides/readme-2.md")).toBe("# README\n\nx\n");
   });
@@ -91,15 +94,15 @@ describe("markdown export", () => {
     const a = await create("A", null, "a");
     await create("B c", a, "b");
     const [one, two] = [await mkdtemp(join(tmpdir(), "wiki-")), await mkdtemp(join(tmpdir(), "wiki-"))];
-    await exportWiki(testDb(), one);
-    await exportWiki(testDb(), two);
+    await exportWiki(testDb(), wikiId, one);
+    await exportWiki(testDb(), wikiId, two);
     const names = await listFiles(one);
     expect([...names].sort()).toEqual(["README.md", "a/", "a/README.md", "a/b-c.md"]);
     expect(await listFiles(two)).toEqual(names);
     for (const n of names.filter((x) => !x.endsWith("/"))) {
       expect(await readFile(join(two, n))).toEqual(await readFile(join(one, n)));
     }
-    await expect(exportWiki(testDb(), one)).rejects.toThrow(/--force/);
-    await expect(exportWiki(testDb(), one, { force: true })).resolves.toEqual({ files: 3 });
+    await expect(exportWiki(testDb(), wikiId, one)).rejects.toThrow(/--force/);
+    await expect(exportWiki(testDb(), wikiId, one, { force: true })).resolves.toEqual({ files: 3 });
   });
 });

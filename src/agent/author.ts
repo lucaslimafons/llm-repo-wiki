@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { APICallError, generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
-import type { Citation, JobPayloads, PageView, QUEUES, SearchHit, SearchInput, TreeNode, WikiStore } from "@/core/contracts";
+import type { Citation, JobPayloads, PageView, QUEUES, ScopedSearch, SearchHit, TreeNode, WikiStore } from "@/core/contracts";
 import type { Db } from "@/db/client";
 import { chunks, repos, sourceFiles, wikiLog } from "@/db/schema";
 import { parseSourceHref } from "@/lib/source-links";
@@ -17,8 +17,9 @@ export type AuthorPayload = JobPayloads[typeof QUEUES.authorWiki];
 
 export type AuthorDeps = {
   db: Db;
-  store: WikiStore;
-  search: (input: SearchInput) => Promise<SearchHit[]>;
+  /** The repo's wiki is known only once the job reads the repo, so the store and search are built for it. */
+  storeFor: (wikiId: string) => WikiStore;
+  searchFor: (wikiId: string) => ScopedSearch;
   model: LanguageModel;
   loadSchema?: () => Promise<string>;
   /** WIKI_SCHEMA.md's page budget. */
@@ -131,9 +132,9 @@ export function proposalReason(toSha: string, why: string) {
 }
 
 /** Job-level entries. The page id stays in details: the store logs its own write with the FK. */
-async function log(db: Db, action: string, input: { repoId: string; pageId?: string; details?: Record<string, unknown> }) {
+async function log(db: Db, action: string, input: { wikiId: string; repoId: string; pageId?: string; details?: Record<string, unknown> }) {
   const details = { ...input.details, ...(input.pageId ? { pageId: input.pageId } : {}) };
-  await db.insert(wikiLog).values({ actor: "agent", action, repoId: input.repoId, details });
+  await db.insert(wikiLog).values({ wikiId: input.wikiId, actor: "agent", action, repoId: input.repoId, details });
 }
 
 /**
@@ -154,20 +155,22 @@ async function allPages(store: WikiStore): Promise<PageView[]> {
  * Every write is a proposal; this job has no delete or move tool at all.
  */
 export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Promise<AuthorResult> {
-  const { db, store } = deps;
+  const { db } = deps;
   const maxPages = deps.maxPages ?? 30;
   const tokenBudget = deps.tokenBudget ?? DEFAULT_AUTHOR_TOKEN_BUDGET;
   const result: AuthorResult = { mode: "skipped", proposed: [], dropped: [], skipped: [], status: "succeeded" };
 
   const [repo] = await db.select().from(repos).where(eq(repos.id, payload.repoId));
   if (!repo) return result;
+  const store = deps.storeFor(repo.wikiId);
+  const search = deps.searchFor(repo.wikiId);
   const repoName = `${repo.owner}/${repo.name}`;
   // A coalesced job carries an older payload; the index is at synced_sha, so write against that.
   const toSha = repo.syncedSha ?? payload.toSha;
 
-  const run = await startAgentRun(db, { kind: "author", model: modelName(deps.model) });
+  const run = await startAgentRun(db, { wikiId: repo.wikiId, kind: "author", model: modelName(deps.model) });
   const author = { kind: "agent" as const, agentRunId: run.id };
-  const project = await getProjectContext(db);
+  const project = await getProjectContext(db, repo.wikiId);
   const siblings = project.repos.filter((r) => r.fullName !== repoName);
   const instructions = buildAuthorInstructions({
     schema: await (deps.loadSchema ?? loadWikiSchema)(),
@@ -179,7 +182,7 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
   const logRun = (action: string, input: { pageId?: string; details: Record<string, unknown> }) => {
     const t = run.totals();
     const spent = { tokens: t.inputTokens + t.outputTokens, costUsd: Number(t.costUsd.toFixed(6)) };
-    return log(db, action, { repoId: repo.id, pageId: input.pageId, details: { runId: run.id, ...spent, ...input.details } });
+    return log(db, action, { wikiId: repo.wikiId, repoId: repo.id, pageId: input.pageId, details: { runId: run.id, ...spent, ...input.details } });
   };
   const overBudget = () => {
     const t = run.totals();
@@ -188,11 +191,11 @@ export async function runAuthorJob(deps: AuthorDeps, payload: AuthorPayload): Pr
 
   // The job retrieves and the model only writes: tools + JSON output in one loop let models skip
   // searching (or never stop), and evidence we chose is evidence we can check citations against.
-  // Every repo is searched: they are parts of one project, so a shared page cites all of them.
+  // Every repo of the wiki is searched: they are parts of one project, so a shared page cites all of them.
   async function gather(queries: string[]): Promise<SearchHit[]> {
     const seen = new Map<string, SearchHit>();
     for (const query of queries.filter((q) => q.trim()).slice(0, MAX_QUERIES)) {
-      for (const hit of await deps.search({ query, scope: "source", limit: HITS_PER_QUERY })) {
+      for (const hit of await search({ query, scope: "source", limit: HITS_PER_QUERY })) {
         if (hit.kind === "source" && !seen.has(hit.chunkId)) seen.set(hit.chunkId, hit);
       }
     }

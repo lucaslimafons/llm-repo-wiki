@@ -31,17 +31,17 @@ export type ExplainAnswer = {
  * One answer over exactly the chunks shown, then the author's grounding check on it, so the
  * explainer can show which citations survive. Chat itself does not strip citations.
  */
-export async function explainAnswer(input: z.input<typeof explainAnswerInputSchema>, deps: { db: Db; model: LanguageModel }): Promise<ExplainAnswer> {
+export async function explainAnswer(input: z.input<typeof explainAnswerInputSchema>, deps: { db: Db; wikiId: string; model: LanguageModel }): Promise<ExplainAnswer> {
   const { query, keys } = explainAnswerInputSchema.parse(input);
   const refs = keys.map((k) => {
     const [kind, id] = k.split(":") as ["source" | "wiki", string];
     return { kind, id, score: 0 };
   });
-  const byKey = await hydrateByKey(deps.db, refs);
+  const byKey = await hydrateByKey(deps.db, deps.wikiId, refs);
   const hits = keys.flatMap((k) => byKey.get(k) ?? []) as SearchHit[];
   if (hits.length === 0) throw new Error("none of those chunks exist any more; run the search again");
 
-  const run = await startAgentRun(deps.db, { kind: "chat", model: modelName(deps.model) });
+  const run = await startAgentRun(deps.db, { wikiId: deps.wikiId, kind: "chat", model: modelName(deps.model) });
   try {
     const out = await generateText({
       model: deps.model,

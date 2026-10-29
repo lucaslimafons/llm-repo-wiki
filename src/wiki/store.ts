@@ -21,6 +21,8 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Q = Db | Tx;
 
 export type WikiStoreDeps = {
+  /** Every read and write is confined to this wiki; an id from another wiki reads as not found. */
+  wikiId: string;
   enqueueIndexPage: (job: { pageId: string; revisionId: string }) => Promise<unknown>;
 };
 
@@ -68,11 +70,9 @@ export type WikiStoreExt = WikiStore & {
   staleFiles(pageId: string): Promise<string[]>;
 };
 
-const LOCK_KEY = sql`hashtext('llm-repo-wiki:pages')`;
-
-/** Serializes wiki writes: cycle, sibling-title and sort-key checks read-then-write the tree. */
-async function lockWiki(tx: Tx) {
-  await tx.execute(sql`select pg_advisory_xact_lock(${LOCK_KEY})`);
+/** Serializes one wiki's writes: cycle, sibling-title and sort-key checks read-then-write its tree. */
+async function lockWiki(tx: Tx, wikiId: string) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"llm-repo-wiki:pages:" + wikiId}))`);
 }
 
 function parseTitle(raw: string): string {
@@ -101,7 +101,7 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function loadOutline(q: Q): Promise<OutlineRow[]> {
+async function loadOutline(q: Q, wikiId: string): Promise<OutlineRow[]> {
   return q
     .select({
       id: pages.id,
@@ -114,7 +114,8 @@ async function loadOutline(q: Q): Promise<OutlineRow[]> {
       hasPendingProposal: sql<boolean>`exists (select 1 from page_revisions r
         where r.page_id = "pages"."id" and r.status = 'proposed')`,
     })
-    .from(pages);
+    .from(pages)
+    .where(eq(pages.wikiId, wikiId));
 }
 
 function mustGet(rows: OutlineRow[], id: string): OutlineRow {
@@ -150,14 +151,14 @@ async function renumber(tx: Tx, ordered: OutlineRow[], parentId: string | null) 
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 
-/** owner/name → repos.id. An unknown repo or a malformed citation is refused, never dropped. */
-async function resolveCitations(q: Q, citations: Citation[]) {
+/** owner/name → repos.id within the wiki. An unknown repo or a malformed citation is refused, never dropped. */
+async function resolveCitations(q: Q, wikiId: string, citations: Citation[]) {
   if (citations.length === 0) return [];
   const names = [...new Set(citations.map((c) => c.repo))];
   const rows = await q
     .select({ id: repos.id, full: sql<string>`${repos.owner} || '/' || ${repos.name}` })
     .from(repos)
-    .where(inArray(sql`${repos.owner} || '/' || ${repos.name}`, names));
+    .where(and(eq(repos.wikiId, wikiId), inArray(sql`${repos.owner} || '/' || ${repos.name}`, names)));
   const byName = new Map(rows.map((r) => [r.full, r.id]));
   return citations.map((c) => {
     const repoId = byName.get(c.repo);
@@ -218,6 +219,21 @@ function toSummary(r: RevisionRow): RevisionSummary {
 
 export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps): WikiStoreExt {
   const d = () => (typeof database === "function" ? database() : database);
+  const { wikiId } = deps;
+  const outline = (q: Q) => loadOutline(q, wikiId);
+  const lock = (tx: Tx) => lockWiki(tx, wikiId);
+  const inWiki = eq(pages.wikiId, wikiId);
+
+  /** A revision of a page in this wiki, or not found: revision ids arrive from URLs and clients. */
+  async function revisionInWiki(q: Q, revisionId: string) {
+    const [row] = await q
+      .select({ rev: pageRevisions })
+      .from(pageRevisions)
+      .innerJoin(pages, eq(pages.id, pageRevisions.pageId))
+      .where(and(eq(pageRevisions.id, revisionId), inWiki));
+    if (!row) throw new WikiError("not_found", `Revision ${revisionId} not found`);
+    return row.rev;
+  }
 
   /** After commit, so the job never reads a revision that is not visible yet. Search is rebuildable. */
   async function index(pageId: string, revisionId: string) {
@@ -233,6 +249,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     entry: { actor: "agent" | "human"; action: string; pageId?: string | null; repoId?: string | null; details?: Record<string, unknown> },
   ) {
     await q.insert(wikiLog).values({
+      wikiId,
       actor: entry.actor,
       action: entry.action,
       pageId: entry.pageId ?? null,
@@ -254,7 +271,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
       citations: Citation[];
     },
   ) {
-    const sources = await resolveCitations(tx, v.citations);
+    const sources = await resolveCitations(tx, wikiId, v.citations);
     const [rev] = await tx
       .insert(pageRevisions)
       .values({
@@ -280,10 +297,10 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
       const base =
         input.baseRevisionId !== undefined
           ? input.baseRevisionId
-          : ((await d().select({ c: pages.currentRevisionId }).from(pages).where(eq(pages.id, input.pageId)))[0]?.c ?? null);
+          : ((await d().select({ c: pages.currentRevisionId }).from(pages).where(and(eq(pages.id, input.pageId), inWiki)))[0]?.c ?? null);
       const result = await d().transaction(async (tx) => {
-        await lockWiki(tx);
-        const rows = await loadOutline(tx);
+        await lock(tx);
+        const rows = await outline(tx);
         const page = mustGet(rows, input.pageId);
         if (page.currentRevisionId !== base) {
           throw new WikiError("conflict", "The page changed since you read it. Reload it and apply your edit again.");
@@ -326,12 +343,12 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
 
   const store: WikiStoreExt = {
     async listTree() {
-      return buildTree(await loadOutline(d()));
+      return buildTree(await outline(d()));
     },
 
     async getPage(ref) {
       return guard(async () => {
-        const rows = await loadOutline(d());
+        const rows = await outline(d());
         const paths = computePaths(rows);
         const row =
           "id" in ref ? rows.find((r) => r.id === ref.id) : rows.find((r) => paths.get(r.id) === ref.path);
@@ -361,14 +378,14 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
         const title = parseTitle(input.title);
         const apply = input.mode === "apply";
         const result = await d().transaction(async (tx) => {
-          await lockWiki(tx);
-          const rows = await loadOutline(tx);
+          await lock(tx);
+          const rows = await outline(tx);
           const parentPath = input.parentId ? (mustGet(rows, input.parentId), computePaths(rows).get(input.parentId)!) : null;
           checkPathLength(joinPath(parentPath, title));
           assertTitleFree(rows, input.parentId, title);
           const [page] = await tx
             .insert(pages)
-            .values({ parentId: input.parentId, title, sortKey: childrenOf(rows, input.parentId).length })
+            .values({ wikiId, parentId: input.parentId, title, sortKey: childrenOf(rows, input.parentId).length })
             .returning({ id: pages.id });
           const revisionId = await insertRevision(tx, {
             pageId: page.id,
@@ -399,8 +416,8 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     async movePage(input: MovePageInput) {
       return guard(async () => {
         await d().transaction(async (tx) => {
-          await lockWiki(tx);
-          const rows = await loadOutline(tx);
+          await lock(tx);
+          const rows = await outline(tx);
           const page = mustGet(rows, input.pageId);
           const to = input.newParentId;
           if (to !== null) {
@@ -433,8 +450,8 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     async deletePage({ pageId, author }) {
       return guard(async () => {
         await d().transaction(async (tx) => {
-          await lockWiki(tx);
-          const rows = await loadOutline(tx);
+          await lock(tx);
+          const rows = await outline(tx);
           const page = mustGet(rows, pageId);
           if (rows.some((r) => r.parentId === pageId)) {
             throw new WikiError("has_children", "Move or delete this page's children first");
@@ -450,11 +467,12 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     async listRevisions(pageId) {
       return guard(async () => {
         const rows = await d()
-          .select()
+          .select({ rev: pageRevisions })
           .from(pageRevisions)
-          .where(eq(pageRevisions.pageId, pageId))
+          .innerJoin(pages, eq(pages.id, pageRevisions.pageId))
+          .where(and(eq(pageRevisions.pageId, pageId), inWiki))
           .orderBy(desc(pageRevisions.createdAt), desc(pageRevisions.id));
-        return rows.map(toSummary);
+        return rows.map((r) => toSummary(r.rev));
       });
     },
 
@@ -462,11 +480,10 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     async acceptRevision(revisionId) {
       return guard(async () => {
         const result = await d().transaction(async (tx) => {
-          await lockWiki(tx);
-          const [rev] = await tx.select().from(pageRevisions).where(eq(pageRevisions.id, revisionId));
-          if (!rev) throw new WikiError("not_found", `Revision ${revisionId} not found`);
+          await lock(tx);
+          const rev = await revisionInWiki(tx, revisionId);
           if (rev.status !== "proposed") throw new WikiError("invalid", `Revision is ${rev.status}, not proposed`);
-          const rows = await loadOutline(tx);
+          const rows = await outline(tx);
           const page = mustGet(rows, rev.pageId);
           if (rev.parentRevisionId !== page.currentRevisionId) {
             throw new WikiError("conflict", "This proposal is outdated: the page changed after it was written. Reject it and re-propose.");
@@ -492,14 +509,13 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     async rejectRevision(revisionId) {
       return guard(async () => {
         await d().transaction(async (tx) => {
-          await lockWiki(tx);
-          const [rev] = await tx.select().from(pageRevisions).where(eq(pageRevisions.id, revisionId));
-          if (!rev) throw new WikiError("not_found", `Revision ${revisionId} not found`);
+          await lock(tx);
+          const rev = await revisionInWiki(tx, revisionId);
           if (rev.status !== "proposed") throw new WikiError("invalid", `Revision is ${rev.status}, not proposed`);
           await tx.update(pageRevisions).set({ status: "rejected" }).where(eq(pageRevisions.id, rev.id));
           await log(tx, { actor: "human", action: "revision.rejected", pageId: rev.pageId, details: { revisionId } });
 
-          const rows = await loadOutline(tx);
+          const rows = await outline(tx);
           const page = mustGet(rows, rev.pageId);
           const [{ pending }] = await tx
             .select({ pending: sql<number>`count(*)::int` })
@@ -527,7 +543,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
             .selectDistinct({ pageId: pages.id, path: revisionSources.path })
             .from(pages)
             .innerJoin(revisionSources, eq(revisionSources.revisionId, pages.currentRevisionId))
-            .where(and(eq(revisionSources.repoId, repoId), inArray(revisionSources.path, paths)))
+            .where(and(inWiki, eq(revisionSources.repoId, repoId), inArray(revisionSources.path, paths)))
             .orderBy(asc(pages.id), asc(revisionSources.path));
           const byPage = new Map<string, string[]>();
           for (const h of hits) byPage.set(h.pageId, [...(byPage.get(h.pageId) ?? []), h.path]);
@@ -544,8 +560,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
 
     async revertToRevision(revisionId, author) {
       return guard(async () => {
-        const [rev] = await d().select().from(pageRevisions).where(eq(pageRevisions.id, revisionId));
-        if (!rev) throw new WikiError("not_found", `Revision ${revisionId} not found`);
+        const rev = await revisionInWiki(d(), revisionId);
         if (rev.status !== "accepted") throw new WikiError("invalid", "Only an accepted revision can be restored");
         const cites = (await citationsByRevision(d(), [rev.id])).get(rev.id) ?? [];
         // Body and citations only: restoring an old title could collide with a sibling created since.
@@ -565,7 +580,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
 
     async listRevisionDetails(pageId) {
       return guard(async () => {
-        const [page] = await d().select({ current: pages.currentRevisionId }).from(pages).where(eq(pages.id, pageId));
+        const [page] = await d().select({ current: pages.currentRevisionId }).from(pages).where(and(eq(pages.id, pageId), inWiki));
         if (!page) throw new WikiError("not_found", `Page ${pageId} not found`);
         const revs = await d()
           .select()
@@ -585,19 +600,23 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     },
 
     async listProposals(filter = {}) {
-      const rows = await loadOutline(d());
+      const rows = await outline(d());
       const paths = computePaths(rows);
-      const revs = await d()
-        .select()
-        .from(pageRevisions)
-        .where(
-          and(
-            eq(pageRevisions.status, "proposed"),
-            filter.pageId ? eq(pageRevisions.pageId, filter.pageId) : undefined,
-            filter.revisionId ? eq(pageRevisions.id, filter.revisionId) : undefined,
-          ),
-        )
-        .orderBy(asc(pageRevisions.createdAt), asc(pageRevisions.id));
+      const revs = (
+        await d()
+          .select({ rev: pageRevisions })
+          .from(pageRevisions)
+          .innerJoin(pages, eq(pages.id, pageRevisions.pageId))
+          .where(
+            and(
+              inWiki,
+              eq(pageRevisions.status, "proposed"),
+              filter.pageId ? eq(pageRevisions.pageId, filter.pageId) : undefined,
+              filter.revisionId ? eq(pageRevisions.id, filter.revisionId) : undefined,
+            ),
+          )
+          .orderBy(asc(pageRevisions.createdAt), asc(pageRevisions.id))
+      ).map((r) => r.rev);
       const currentIds = [...new Set(rows.map((r) => r.currentRevisionId).filter((x): x is string => !!x))];
       const currents = currentIds.length
         ? await d()
@@ -626,7 +645,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     },
 
     async listProposalSummaries() {
-      const rows = await loadOutline(d());
+      const rows = await outline(d());
       const paths = computePaths(rows);
       const revs = await d()
         .select({
@@ -641,7 +660,8 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
           citationCount: sql<number>`(select count(*)::int from ${revisionSources} where ${revisionSources.revisionId} = ${pageRevisions.id})`,
         })
         .from(pageRevisions)
-        .where(eq(pageRevisions.status, "proposed"))
+        .innerJoin(pages, eq(pages.id, pageRevisions.pageId))
+        .where(and(inWiki, eq(pageRevisions.status, "proposed")))
         .orderBy(asc(pageRevisions.createdAt), asc(pageRevisions.id));
       return revs.map(({ parentRevisionId, title, citationCount, ...r }) => {
         const page = rows.find((p) => p.id === r.pageId)!;
@@ -658,12 +678,16 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
     },
 
     async countProposals() {
-      const [{ n }] = await d().select({ n: sql<number>`count(*)::int` }).from(pageRevisions).where(eq(pageRevisions.status, "proposed"));
+      const [{ n }] = await d()
+        .select({ n: sql<number>`count(*)::int` })
+        .from(pageRevisions)
+        .innerJoin(pages, eq(pages.id, pageRevisions.pageId))
+        .where(and(inWiki, eq(pageRevisions.status, "proposed")));
       return n;
     },
 
     async pagePaths() {
-      return Object.fromEntries(computePaths(await loadOutline(d())));
+      return Object.fromEntries(computePaths(await outline(d())));
     },
 
     async staleFiles(pageId) {
@@ -672,7 +696,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
           .select({ stale: pages.stale, revAt: pageRevisions.createdAt })
           .from(pages)
           .leftJoin(pageRevisions, eq(pageRevisions.id, pages.currentRevisionId))
-          .where(eq(pages.id, pageId));
+          .where(and(eq(pages.id, pageId), inWiki));
         if (!page?.stale) return [];
         const logs = await d()
           .select({ details: wikiLog.details })
@@ -692,7 +716,7 @@ export function createWikiStore(database: Db | (() => Db), deps: WikiStoreDeps):
   return store;
 }
 
-/** The app's store: the shared database, and accepted revisions re-embedded by the worker. */
-export const wikiStore: WikiStoreExt = createWikiStore(() => appDb(), {
-  enqueueIndexPage: (job) => enqueue(QUEUES.indexPage, job),
-});
+/** The app's store for one wiki: the shared database, and accepted revisions re-embedded by the worker. */
+export function wikiStore(wikiId: string): WikiStoreExt {
+  return createWikiStore(() => appDb(), { wikiId, enqueueIndexPage: (job) => enqueue(QUEUES.indexPage, job) });
+}

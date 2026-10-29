@@ -2,10 +2,11 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { repos, webhookDeliveries } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { handleGitHubWebhook, verifySignature } from "./webhook";
 
 const db = testDb();
+let wikiId: string;
 const SECRET = "s3cret";
 const AFTER = "f".repeat(40);
 
@@ -31,7 +32,10 @@ describe("verifySignature", () => {
 });
 
 describe("handleGitHubWebhook", () => {
-  beforeEach(resetDb);
+  beforeEach(async () => {
+    await resetDb();
+    wikiId = await createTestWiki();
+  });
 
   const sign = (body: string) => `sha256=${createHmac("sha256", SECRET).update(body).digest("hex")}`;
   const push = (ref: string, extra: object = {}) =>
@@ -43,7 +47,7 @@ describe("handleGitHubWebhook", () => {
     const enqueued: string[] = [];
     const [repo] = await db
       .insert(repos)
-      .values({ owner: "acme", name: "widgets", defaultBranch: "main", desiredSha: "a".repeat(40), syncedSha: "a".repeat(40) })
+      .values({ wikiId, owner: "acme", name: "widgets", defaultBranch: "main", desiredSha: "a".repeat(40), syncedSha: "a".repeat(40) })
       .returning();
     return { repo, enqueued, deps: { db, secret: SECRET, enqueueSync: async (id: string) => enqueued.push(id) } };
   }

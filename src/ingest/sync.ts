@@ -107,6 +107,7 @@ async function runSync(deps: SyncDeps, repoId: string): Promise<SyncResult> {
         .set({ syncedSha: toSha, lastSyncedAt: new Date(), lastError: null, status: "idle" })
         .where(eq(repos.id, repoId));
       await tx.insert(wikiLog).values({
+        wikiId: wikiOf(repoId),
         actor: "agent",
         action: "repo.synced",
         repoId,
@@ -138,10 +139,13 @@ async function runSync(deps: SyncDeps, repoId: string): Promise<SyncResult> {
   }
 }
 
+/** A log row belongs to its repo's wiki. */
+const wikiOf = (repoId: string) => sql<string>`(select ${repos.wikiId} from ${repos} where ${repos.id} = ${repoId})`;
+
 /** Progress is for watching, never load-bearing: a failed write is logged and the sync carries on. */
 async function logProgress(db: Db, repoId: string, action: string, details: Record<string, unknown>) {
   try {
-    await db.insert(wikiLog).values({ actor: "agent", action, repoId, details });
+    await db.insert(wikiLog).values({ wikiId: wikiOf(repoId), actor: "agent", action, repoId, details });
   } catch (err) {
     console.warn(`[sync] could not log ${action} for ${repoId}:`, (err as Error).message);
   }

@@ -35,10 +35,15 @@ export function splitRuns(events: TimelineEvent[]): { key: string; events: Timel
   return runs;
 }
 
-export async function getRepoTimeline(db: Db, input: { repoId?: string; run?: string }): Promise<RepoTimeline> {
+/** A repo id from another wiki is ignored: the page falls back to this wiki's first repo. */
+export async function getRepoTimeline(db: Db, wikiId: string, input: { repoId?: string; run?: string }): Promise<RepoTimeline> {
   const [repoRows, { pipelines }] = await Promise.all([
-    db.select({ id: repos.id, owner: repos.owner, name: repos.name, status: repos.status }).from(repos).orderBy(repos.createdAt),
-    getRepoPipelines(db),
+    db
+      .select({ id: repos.id, owner: repos.owner, name: repos.name, status: repos.status })
+      .from(repos)
+      .where(eq(repos.wikiId, wikiId))
+      .orderBy(repos.createdAt),
+    getRepoPipelines(db, wikiId),
   ]);
   const asOf = new Date().toISOString();
   const list = repoRows.map((r) => ({ id: r.id, fullName: `${r.owner}/${r.name}` }));
