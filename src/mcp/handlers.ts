@@ -17,18 +17,28 @@ export type McpDeps = {
   store: Pick<WikiStoreExt, "getPage" | "listTree" | "listProposals" | "pagePaths">;
   search: (input: SearchInput) => Promise<SearchHit[]>;
   syncRepo: (repoId: string) => Promise<ActionResult>;
+  profile?: SearchProfile;
 };
 
-/** Per hit: enough to judge relevance; the full file is one Read away via the permalink. */
-const SNIPPET_CHARS = 1_500;
+/**
+ * How much one search returns. "full" measured as costly as ~7 file reads per call (docs/evals.md),
+ * so "compact" returns fewer, shorter, one-per-file hits: enough to choose which file to open.
+ */
+export const SEARCH_PROFILES = {
+  full: { limit: 8, snippetChars: 1_500, onePerFile: false },
+  compact: { limit: 5, snippetChars: 500, onePerFile: true },
+} as const;
+export type SearchProfile = keyof typeof SEARCH_PROFILES;
+/** Candidates fetched per returned hit when keeping one hit per file. */
+const DEDUPE_OVERFETCH = 3;
 // Zero-width and bidi controls: invisible to a reader, a known carrier for injected instructions.
 const INVISIBLE = /[​-‏‪-‮⁠-⁤﻿]/g;
 
 export const searchInputSchema = z.object({
-  query: z.string().trim().min(1).max(500).describe("What to find, in plain words or identifiers, e.g. 'how the free-tier import quota is refilled'."),
+  query: z.string().trim().min(1).max(500).describe("What to find, in plain words or identifiers, e.g. 'how webhook signatures are verified'."),
   scope: z.enum(["source", "wiki", "all"]).default("all").describe("source = code and docs in the repos; wiki = accepted wiki pages; all = both."),
   repo: repoFullNameSchema.optional().describe("Limit to one repository, as owner/name."),
-  limit: z.number().int().min(1).max(20).default(8).describe("Hits to return (default 8)."),
+  limit: z.number().int().min(1).max(20).optional().describe("Hits to return (default 5, or 8 on the full profile)."),
 });
 export const readPageInputSchema = z.object({
   path: z.string().trim().min(1).max(500).describe("Page path as list_pages shows it, e.g. 'Architecture/Mobile App'."),
@@ -42,9 +52,13 @@ const clean = (text: string) => text.replace(INVISIBLE, "");
 
 /** Inputs arrive already parsed by the SDK against these schemas (tests parse explicitly). */
 export async function searchTool(deps: McpDeps, input: z.output<typeof searchInputSchema>): Promise<string> {
-  const { query, scope, repo, limit } = input;
+  const { query, scope, repo } = input;
+  const p = SEARCH_PROFILES[deps.profile ?? "compact"];
+  const limit = input.limit ?? p.limit;
   const repoName = repo ? `${repo.owner}/${repo.name}` : undefined;
-  const hits = await deps.search({ query, scope, repo: repoName, limit });
+  const found = await deps.search({ query, scope, repo: repoName, limit: p.onePerFile ? Math.min(limit * DEDUPE_OVERFETCH, 20) : limit });
+  const hits = (p.onePerFile ? onePerFile(found) : found).slice(0, limit);
+  const snippet = (text: string) => clip(text, p.snippetChars);
   if (hits.length === 0) return `No results for "${query}". Try other words, scope "all", or grep the repo directly.`;
 
   const sources = hits.filter((h): h is Extract<SearchHit, { kind: "source" }> => h.kind === "source");
@@ -172,9 +186,20 @@ async function citingPages(deps: McpDeps, hits: { repo: string; path: string }[]
   return out;
 }
 
-function snippet(text: string): string {
+function clip(text: string, max: number): string {
   const c = clean(text);
-  return c.length <= SNIPPET_CHARS ? c : `${c.slice(0, SNIPPET_CHARS)}\n… (truncated: open the permalink or read the file for the rest)`;
+  return c.length <= max ? c : `${c.slice(0, max)}\n… (truncated: open the permalink or read the file for the rest)`;
+}
+
+/** Best-ranked hit per file (or wiki page): several chunks of one file rarely add a new lead. */
+function onePerFile(hits: SearchHit[]): SearchHit[] {
+  const seen = new Set<string>();
+  return hits.filter((h) => {
+    const key = h.kind === "source" ? `${h.repo}/${h.path}` : `wiki:${h.pagePath}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /** The app's own link forms mean nothing to an external client: permalinks and page paths instead. */

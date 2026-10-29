@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { db } from "@/db/client";
+import { env } from "@/lib/env";
 import { prodRepoDeps } from "@/ingest/deps";
 import { syncRepoNow } from "@/ingest/repos";
 import { getBoss } from "@/jobs/queue";
@@ -23,7 +24,9 @@ import { SERVER_INSTRUCTIONS } from "./instructions";
 console.log = console.info = console.debug = console.error;
 
 let queueStarted = false;
+const profile = env().MCP_PROFILE;
 const deps: McpDeps = {
+  profile,
   db: db(),
   store: wikiStore,
   search: searchKnowledge,
@@ -53,6 +56,8 @@ function createServer() {
         "Search code, docs and wiki pages across every indexed repository at once (hybrid full-text + semantic search). Returns ranked snippets with repo/path#lines@sha, a GitHub permalink, the wiki pages that cite each file, and how fresh the index is.",
       inputSchema: searchInputSchema,
       annotations: READ_ONLY,
+      // Loaded at session start instead of via a tool-search turn (measured on every run otherwise).
+      ...(profile === "compact" ? { _meta: { "anthropic/alwaysLoad": true } } : {}),
     },
     (input) => run(() => searchTool(deps, input)),
   );

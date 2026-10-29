@@ -38,4 +38,14 @@ describe("bench-mcp", () => {
     expect(summarize([grep, cheap])).toContain("PASSES the bar");
     expect(summarize([grep, pricey])).toContain("does NOT pass the bar");
   });
+
+  it("gives every MCP arm its own column and verdict against grep", () => {
+    const grep = { ...parse(stream, { ...meta, arm: "grep" }), tokens: 1000, recall: 1 };
+    const full = { ...parse(stream, meta), tokens: 1000, recall: 1 };
+    const compact = { ...parse(stream, { ...meta, arm: "mcp-compact" }), tokens: 500, recall: 1 };
+    const out = summarize([grep, full, compact]);
+    expect(out).toContain("| metric (mean ± sd) | grep | mcp | mcp-compact |");
+    expect(out).toMatch(/^mcp: .*does NOT pass the bar/m);
+    expect(out).toMatch(/^mcp-compact: .*PASSES the bar/m);
+  });
 });

@@ -154,6 +154,51 @@ on 6 golden questions. An answer counts as grounded when it cites the file that 
 GLM 5.3 Flash, the best outline planner in Eval 1, searched least and missed half the questions as a
 chat agent. GPT-5.6 Luna searched most but rarely cited what it found.
 
+## Eval 5: MCP server vs grep
+
+The MCP server does not save tokens yet, but its answers name more of the right files. Neither
+search profile met the pre-registered bar of 0.7× the tokens of grep alone. The `compact` profile
+came closer than `full` and is now the default. These runs used a private multi-repo index, so this
+section gives directions and lessons, not the numbers or the questions.
+
+**Method.** `pnpm bench:mcp` asks Claude Code (`claude -p`) the same question in separate arms:
+built-in tools only, or built-in tools plus this server. Each arm records tokens, turns, time, tool
+calls and expected-file recall (how many of the files a question needs appear in the answer). There
+were 13 questions written before any run, 3 runs per arm, with the arm order rotated. See
+[Measuring it](mcp.md#measuring-it).
+
+**What the runs showed:**
+
+- **Recall was higher with MCP.** The gain came from questions phrased differently from the code.
+  Semantic search found files whose names share no word with the question; grep missed them.
+- **The savings came only on questions that span several repos.** There the index replaced many
+  rounds of grep. On a question with one clear location, MCP cost more: Claude searched, then
+  grepped and read as it would have anyway.
+- **MCP was added on top, not used instead.** With the server connected, Claude still grepped and
+  read files in every run. The index steered where it looked; it did not stop it from looking.
+- **Large results ate the savings.** With the `full` profile, one search returned about as much text
+  as several file reads. `compact` (5 hits, one per file, short snippets) made results about 60%
+  smaller. Claude then read more files itself, and the total still came down.
+- **Tool loading cost a turn.** Claude Code loads MCP tools on demand, so `full` runs often spent a
+  turn on tool search first. `compact` marks `search_knowledge` to load at session start, which
+  removed most of those turns.
+- **The wiki tools were barely used.** `read_page` and `list_pages` were called in a handful of
+  runs. Claude went to code, not to the written wiki.
+
+**Pitfalls in the measurement itself:**
+
+- **The working folder decides the result.** An early run used a parent folder full of other
+  clones. The grep arm then searched stale copies too, and MCP looked about 20% cheaper. That gap
+  was an artifact of the harness. `claude -p` can also read paths outside its working folders, so
+  use a folder holding only the indexed repos.
+- **Single runs mislead.** The same question in the same arm varied by up to 2× in tokens. Three
+  runs per arm was the minimum to see a direction.
+- **Recall is a proxy.** It counts file names in the answer. Reading answers side by side, a
+  lower-recall answer was often just as correct and cited the same lines, but named fewer files.
+
+The honest pitch, for now, is orientation and accuracy across repos, not cost. A public version of
+this eval, on public repos with the questions committed, is still to do.
+
 ## Failure modes found
 
 Five failures showed up in the first live runs, none of them in the mocked test suite. Each one changed

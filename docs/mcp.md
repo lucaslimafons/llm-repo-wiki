@@ -32,13 +32,28 @@ The server's instructions tell Claude when to use the index: questions that span
 or getting oriented. They also say when to grep instead: exact strings, every occurrence, or before
 editing a file. Snippets come back as quoted `<retrieved>` data, never as instructions.
 
+## Search profiles
+
+`MCP_PROFILE` sets how much one `search_knowledge` call returns:
+
+| Profile | Hits | Per file | Snippet | Tool loading |
+|---|---|---|---|---|
+| `compact` (default) | 5 | best chunk only | 500 chars | loaded at session start |
+| `full` | 8 | every ranked chunk | 1,500 chars | through Claude Code's tool search |
+
+Compact exists because full results were large: one search cost about as much context as several
+file reads, and Claude read the files anyway. Compact points Claude at the right files and lets it
+read them. In the benchmark below it used fewer tokens than `full` and needed no tool-search turn.
+Set `MCP_PROFILE=full` if you want more code inline per search. A caller can still pass `limit`.
+
 Your questions are answered by Claude Code, on your own Claude plan. The wiki only retrieves, at
 the cost of one query embedding per search.
 
 ## Measuring it
 
 Whether it saves tokens or time is measured, not assumed. `pnpm bench:mcp` runs each question
-through `claude -p` twice, identical except that one run also has the MCP tools. It records tokens,
+through `claude -p` once per arm: `grep` (built-in tools only), `mcp` (plus the MCP tools, `full`
+profile) and `mcp-compact` (the `compact` profile). The arms are identical otherwise. It records tokens,
 turns, time, which tools were called, whether MCP connected, and how many expected files the answer
 names. It runs on your Claude Code login; no API key is needed.
 
@@ -46,6 +61,7 @@ names. It runs on your Claude Code login; no API key is needed.
 cp eval/mcp-bench.example.json eval/mcp-bench.local.json   # edit workdir, addDirs, questions
 pnpm bench:mcp --runs 1          # a first look
 pnpm bench:mcp --runs 3          # enough runs to see past the noise
+pnpm bench:mcp --arms grep,mcp,mcp-compact   # compare both profiles (default: grep,mcp-compact)
 ```
 
 `eval/mcp-bench.local.json` and `eval/results/` are gitignored, because both quote your repos.
@@ -54,12 +70,13 @@ Three things decide whether the numbers mean anything:
 
 - **The working folder must hold only the indexed repos.** Point `workdir` at one of them and list
   the others in `addDirs`. A parent folder full of other clones lets the grep-only run search stale
-  copies, which inflates the MCP side's advantage. The harness also leaves Read, Grep and Glob to
-  Claude Code's defaults, so they stay inside those folders.
+  copies, which inflates the MCP side's advantage. In `claude -p`, Read, Grep and Glob can still
+  reach files outside those folders without asking, for example a path named in your Claude Code
+  memory. For a clean run, use a folder that holds only fresh clones of the indexed repos.
 - **Run each question at least 3 times.** Single runs of the same question vary by 2× in tokens.
 - **Read the answers.** "Expected-file recall" only checks which files an answer names. Answers
   built from snippets alone can name fewer files and still be right, or the reverse.
 
 The pass bar is set in the script before any run: at most 0.7× the tokens of grep alone, with no
-more than 0.05 lower recall. Published results will come from public repos, with the questions
-committed; see [`evals.md`](evals.md).
+more than 0.05 lower recall. What the first runs found, and why neither profile passes yet, is in
+[`evals.md`](evals.md#eval-5-mcp-server-vs-grep).

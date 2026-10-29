@@ -92,6 +92,28 @@ describe("search_knowledge", () => {
   });
 });
 
+describe("search_knowledge: compact profile", () => {
+  it("keeps the best hit per file, five by default, with short snippets", async () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      hit({ chunkId: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, path: `src/f${Math.floor(i / 2)}.ts`, content: "y".repeat(900) }),
+    );
+    const asked: number[] = [];
+    const d = { ...deps(many), search: async (input: { limit?: number }) => (asked.push(input.limit ?? 0), many) };
+    const out = await searchTool(d, searchInputSchema.parse({ query: "q" }));
+    expect(asked).toEqual([15]);
+    expect(out.match(/^\[\d+\] /gm)).toHaveLength(5);
+    expect(new Set(out.match(/src\/f\d\.ts#/g))).toHaveProperty("size", 5);
+    expect(out).toContain("(truncated");
+    expect(out.match(/y+/g)!.every((run) => run.length <= 500)).toBe(true);
+  });
+
+  it("the full profile still returns every chunk the search ranked", async () => {
+    const two = [hit({ path: "src/a.ts" }), hit({ chunkId: "00000000-0000-4000-8000-000000000002", path: "src/a.ts", startLine: 30, endLine: 40 })];
+    const out = await searchTool({ ...deps(two), profile: "full" }, searchInputSchema.parse({ query: "q" }));
+    expect(out.match(/^\[\d+\] /gm)).toHaveLength(2);
+  });
+});
+
 describe("read_page", () => {
   it("returns a proposal-only page labelled, with app links rewritten to permalinks", async () => {
     await proposeQuotaPage();

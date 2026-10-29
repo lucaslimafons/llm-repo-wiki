@@ -4,7 +4,7 @@
  * wiki's MCP tools. Copy eval/mcp-bench.example.json to eval/mcp-bench.local.json (gitignored:
  * questions and transcripts quote private repos). Uses your Claude Code login, not an API key.
  *
- *   pnpm bench:mcp [--config path] [--runs n] [--only id,id]
+ *   pnpm bench:mcp [--config path] [--runs n] [--only id,id] [--arms grep,mcp,mcp-compact]
  */
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -19,7 +19,10 @@ const configSchema = z.object({
   questions: z.array(z.object({ id: z.string(), question: z.string(), expect: z.array(z.string().regex(/^[^:]+:.+$/, "repo:path")) })).min(1),
 });
 type Config = z.infer<typeof configSchema>;
-type Arm = "grep" | "mcp";
+const ARMS = ["grep", "mcp", "mcp-compact"] as const;
+type Arm = (typeof ARMS)[number];
+/** Server env per MCP arm: the same server, a different MCP_PROFILE. */
+const ARM_ENV: Record<Exclude<Arm, "grep">, Record<string, string>> = { mcp: { MCP_PROFILE: "full" }, "mcp-compact": { MCP_PROFILE: "compact" } };
 
 /** Pre-registered bar (issue #13): ship it as the recommended setup only if this holds. */
 const BAR = { maxTokenRatio: 0.7, maxRecallDrop: 0.05 };
@@ -60,19 +63,23 @@ async function main() {
 
   const outDir = join(repoRoot, "eval/results/mcp", new Date().toISOString().replace(/[:.]/g, "-"));
   await mkdir(outDir, { recursive: true });
-  const mcpConfigs: Record<Arm, string> = { grep: join(outDir, "mcp-none.json"), mcp: join(outDir, "mcp-wiki.json") };
-  await writeFile(mcpConfigs.grep, JSON.stringify({ mcpServers: {} }));
-  await writeFile(
-    mcpConfigs.mcp,
-    JSON.stringify({ mcpServers: { "llm-repo-wiki": { type: "stdio", command: "pnpm", args: ["--silent", "--dir", repoRoot, "mcp"] } } }),
-  );
+  const arms = (arg("arms") ?? "grep,mcp-compact").split(",").map((a) => z.enum(ARMS).parse(a));
+  const mcpConfigs = {} as Record<Arm, string>;
+  for (const arm of ARMS) {
+    mcpConfigs[arm] = join(outDir, `mcp-${arm}.json`);
+    const servers =
+      arm === "grep"
+        ? {}
+        : { "llm-repo-wiki": { type: "stdio", command: "pnpm", args: ["--silent", "--dir", repoRoot, "mcp"], env: ARM_ENV[arm] } };
+    await writeFile(mcpConfigs[arm], JSON.stringify({ mcpServers: servers }));
+  }
 
   const results: RunResult[] = [];
   for (const q of questions) {
     for (let run = 1; run <= runs; run++) {
-      // Alternate which arm goes first, so warm caches don't always favour the same one.
-      const arms: Arm[] = run % 2 ? ["grep", "mcp"] : ["mcp", "grep"];
-      for (const arm of arms) {
+      // Rotate which arm goes first, so warm caches don't always favour the same one.
+      const order = arms.map((_, i) => arms[(i + run - 1) % arms.length]);
+      for (const arm of order) {
         const r = await runOnce(config, q, arm, run, mcpConfigs[arm], outDir);
         results.push(r);
         console.error(`${q.id} ${arm} #${run}: ${r.ok ? `${r.tokens} tokens, ${r.turns} turns, ${(r.ms / 1000).toFixed(0)}s, recall ${r.recall.toFixed(2)}` : `FAILED ${r.error}`}`);
@@ -95,7 +102,7 @@ function runOnce(config: Config, q: Config["questions"][number], arm: Arm, run: 
     "--strict-mcp-config",
     "--mcp-config",
     mcpConfig,
-    ...(arm === "mcp" ? ["--allowedTools", ...MCP_TOOLS] : []),
+    ...(arm !== "grep" ? ["--allowedTools", ...MCP_TOOLS] : []),
     "--disallowedTools",
     ...DENIED,
     ...config.addDirs.flatMap((d) => ["--add-dir", d]),
@@ -166,26 +173,33 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 const sd = (xs: number[]) => Math.sqrt(mean(xs.map((x) => (x - mean(xs)) ** 2)));
 const fmt = (xs: number[], d = 0) => `${mean(xs).toFixed(d)} ± ${sd(xs).toFixed(d)}`;
 
+/** grep alone is the baseline; every other arm gets its own column and its own verdict on the bar. */
 export function summarize(results: RunResult[]): string {
-  const by = (arm: Arm) => results.filter((r) => r.arm === arm && r.ok);
-  const g = by("grep");
-  const m = by("mcp");
-  const usedMcp = m.filter((r) => Object.keys(r.toolCalls).some((t) => t.startsWith("mcp__"))).length;
-  const row = (name: string, f: (r: RunResult) => number, d = 0) => `| ${name} | ${fmt(g.map(f), d)} | ${fmt(m.map(f), d)} |`;
-  const ratio = mean(g.map((r) => r.tokens)) ? mean(m.map((r) => r.tokens)) / mean(g.map((r) => r.tokens)) : NaN;
-  const drop = mean(g.map((r) => r.recall)) - mean(m.map((r) => r.recall));
-  const pass = ratio <= BAR.maxTokenRatio && drop <= BAR.maxRecallDrop;
+  const ok = (arm: Arm) => results.filter((r) => r.arm === arm && r.ok);
+  const arms = ARMS.filter((a) => results.some((r) => r.arm === a));
+  const g = ok("grep");
+  const row = (name: string, f: (r: RunResult) => number, d = 0) => `| ${name} | ${arms.map((a) => fmt(ok(a).map(f), d)).join(" | ")} |`;
+  const verdicts = arms
+    .filter((a) => a !== "grep")
+    .map((a) => {
+      const m = ok(a);
+      const used = m.filter((r) => Object.keys(r.toolCalls).some((t) => t.startsWith("mcp__"))).length;
+      const ratio = mean(g.map((r) => r.tokens)) ? mean(m.map((r) => r.tokens)) / mean(g.map((r) => r.tokens)) : NaN;
+      const drop = mean(g.map((r) => r.recall)) - mean(m.map((r) => r.recall));
+      const pass = ratio <= BAR.maxTokenRatio && drop <= BAR.maxRecallDrop;
+      return `${a}: ${m.length}/${results.filter((r) => r.arm === a).length} ok, MCP connected in ${m.filter((r) => r.mcpConnected).length}, used in ${used}. Token ratio vs grep ${ratio.toFixed(2)} (bar ≤ ${BAR.maxTokenRatio}); recall vs grep ${(-drop >= 0 ? "+" : "") + (-drop).toFixed(2)} (bar: drop ≤ ${BAR.maxRecallDrop}) → ${pass ? "PASSES the bar" : "does NOT pass the bar"}.`;
+    });
   return [
-    `| metric (mean ± sd) | grep only | grep + MCP |`,
-    `|---|---|---|`,
+    `| metric (mean ± sd) | ${arms.join(" | ")} |`,
+    `|---|${arms.map(() => "---").join("|")}|`,
     row("tokens (in + out + cache)", (r) => r.tokens),
     row("cost USD (client estimate)", (r) => r.costUsd, 4),
     row("turns", (r) => r.turns, 1),
     row("seconds", (r) => r.ms / 1000, 0),
     row("expected-file recall", (r) => r.recall, 2),
     "",
-    `Runs ok: grep ${g.length}/${results.filter((r) => r.arm === "grep").length}, mcp ${m.length}/${results.filter((r) => r.arm === "mcp").length}. MCP connected in ${m.filter((r) => r.mcpConnected).length}, MCP tools used in ${usedMcp}.`,
-    `Token ratio mcp/grep ${ratio.toFixed(2)} (bar ≤ ${BAR.maxTokenRatio}); recall drop ${drop.toFixed(2)} (bar ≤ ${BAR.maxRecallDrop}) → ${pass ? "PASSES the bar" : "does NOT pass the bar"}.`,
+    `grep: ${g.length}/${results.filter((r) => r.arm === "grep").length} ok.`,
+    ...verdicts,
   ].join("\n");
 }
 
