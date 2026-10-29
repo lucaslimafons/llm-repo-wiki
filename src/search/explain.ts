@@ -51,11 +51,11 @@ const RERANK_NEEDS_RETENTION =
 const keyOf = (r: { kind: string; id: string }) => `${r.kind}:${r.id}`;
 
 /** Hybrid search with its working shown: both lists, their ranks, and the fused order. */
-export async function explainSearch(input: ExplainInput, deps: SearchDeps = defaultDeps()): Promise<SearchExplanation> {
+export async function explainSearch(wikiId: string, input: ExplainInput, deps: SearchDeps = defaultDeps()): Promise<SearchExplanation> {
   const { query, rerank: withRerank } = explainInputSchema.parse(input);
   const rerankAvailable = !env().OPENROUTER_ZDR;
   if (withRerank && !rerankAvailable) throw new Error(RERANK_NEEDS_RETENTION);
-  const { rows, vector } = await rank({ query, scope: "all" }, CANDIDATES * 2, "hybrid", deps);
+  const { rows, vector } = await rank({ wikiId, query, scope: "all" }, CANDIDATES * 2, "hybrid", deps);
 
   const fts = rows.filter((r) => r.ftsRank !== null).sort((a, b) => a.ftsRank! - b.ftsRank!).slice(0, EXPLAIN_LIST_SIZE);
   const vec = rows.filter((r) => r.vecRank !== null).sort((a, b) => a.vecRank! - b.vecRank!).slice(0, EXPLAIN_LIST_SIZE);
@@ -63,7 +63,7 @@ export async function explainSearch(input: ExplainInput, deps: SearchDeps = defa
 
   const wanted = new Map<string, RankedRow>();
   for (const r of [...fts, ...vec, ...pool]) wanted.set(keyOf(r), r);
-  const byKey = await hydrateByKey(deps.db, [...wanted.values()]);
+  const byKey = await hydrateByKey(deps.db, wikiId, [...wanted.values()]);
   const fusedRank = new Map(rows.map((r, i) => [keyOf(r), i + 1]));
 
   const item = (r: RankedRow): ExplainItem | null => {

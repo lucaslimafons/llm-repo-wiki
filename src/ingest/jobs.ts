@@ -1,6 +1,8 @@
 import type { PgBoss } from "pg-boss";
 import { QUEUES, type JobPayloads } from "@/core/contracts";
+import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
+import { repos } from "@/db/schema";
 import { enqueue, enqueueRepoSync } from "@/jobs/queue";
 import { env } from "@/lib/env";
 import { wikiStore } from "@/wiki/store";
@@ -16,7 +18,10 @@ function prodSyncDeps(): SyncDeps {
     github: prodGitHub(),
     embedder: prodEmbedder(),
     chunker: createDefaultChunker(),
-    markStaleByFiles: (repoId, paths) => wikiStore.markStaleByFiles(repoId, paths),
+    markStaleByFiles: async (repoId, paths) => {
+      const [repo] = await db().select({ wikiId: repos.wikiId }).from(repos).where(eq(repos.id, repoId));
+      return repo ? wikiStore(repo.wikiId).markStaleByFiles(repoId, paths) : [];
+    },
     // stately + singletonKey: a second author run for the same repo coalesces into the queued one.
     enqueueAuthor: (payload) => enqueue(QUEUES.authorWiki, payload, { singletonKey: payload.repoId }),
     enqueueSync: enqueueRepoSync,

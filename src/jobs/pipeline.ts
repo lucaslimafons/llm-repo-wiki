@@ -50,9 +50,9 @@ function jobState(state: string | undefined): StepState {
   return "idle";
 }
 
-/** One row per repo: where it is in sync → author → review, read from the queue and the logs. */
-export async function getRepoPipelines(db: Db): Promise<{ pipelines: RepoPipeline[]; runRepo: Map<string, string> }> {
-  const repoRows = await db.select().from(repos).orderBy(asc(repos.createdAt));
+/** One row per repo of the wiki: where it is in sync → author → review, read from the queue and the logs. */
+export async function getRepoPipelines(db: Db, wikiId: string): Promise<{ pipelines: RepoPipeline[]; runRepo: Map<string, string> }> {
+  const repoRows = await db.select().from(repos).where(eq(repos.wikiId, wikiId)).orderBy(asc(repos.createdAt));
   if (repoRows.length === 0) return { pipelines: [], runRepo: new Map() };
   const repoIds = repoRows.map((r) => r.id);
 

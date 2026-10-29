@@ -1,7 +1,9 @@
 import { ArrowDown, ArrowRight, Download, Eye, PenLine } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { useWiki } from "@/components/wikis/WikiContext";
 import type { RepoPipeline, StepState } from "@/jobs/pipeline";
+import { wikiBase } from "@/wiki/routes";
 
 const STATE_LABEL: Record<StepState, string> = {
   idle: "not started",
@@ -23,6 +25,7 @@ const STATE_TONE: Record<StepState, string> = {
 
 /** One repo's trip through the pipeline: sync → author → review, with what each step produced. */
 export function PipelineCard({ p, now, format }: { p: RepoPipeline; now: number; format: { usd: (n: number) => string; tokens: (n: number) => string; duration: (from: string, to: string | null, now: number) => string } }) {
+  const { slug } = useWiki();
   const { sync, author } = p;
   const handled = author.proposed + author.dropped + author.skipped;
   const progress = author.planned ? Math.min(1, handled / author.planned) : null;
@@ -73,7 +76,7 @@ export function PipelineCard({ p, now, format }: { p: RepoPipeline; now: number;
         <Step icon={<Eye className="size-4" />} title="3 · Review" state={p.pendingReview > 0 ? "waiting" : author.state === "done" || author.state === "stopped" ? "done" : "idle"}>
           {p.pendingReview > 0 ? (
             <p>
-              <Link href="/proposals" className="text-accent hover:underline">
+              <Link href={`${wikiBase(slug)}/proposals`} className="text-accent hover:underline">
                 {p.pendingReview} proposal{p.pendingReview === 1 ? "" : "s"}
               </Link>{" "}
               cite this repo

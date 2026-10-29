@@ -9,11 +9,13 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
 import { AlertTriangle, RotateCcw, SendHorizontal, Square } from "lucide-react";
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { WRITE_TOOL_NAMES } from "@/agent/tool-names";
 import type { WikiUIMessage } from "@/agent/tools";
 import { Markdown } from "@/components/markdown/Markdown";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
+import { apiBase } from "@/wiki/routes";
 import { chatApi } from "./api";
 import { SourcesList } from "./SourcesList";
 import { ToolActivity } from "./ToolActivity";
@@ -22,16 +24,17 @@ import { needsApproval, ToolPart } from "./ToolPart";
 const WRITES = new Set<string>(WRITE_TOOL_NAMES);
 
 // Only the newest message goes up: the server owns the history (and the approvals in it).
-const transport = new DefaultChatTransport<WikiUIMessage>({
-  api: "/api/chat",
-  prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, message: messages.at(-1) } }),
-});
+const makeTransport = (slug: string) =>
+  new DefaultChatTransport<WikiUIMessage>({
+    api: `${apiBase(slug)}/chat`,
+    prepareSendMessagesRequest: ({ id, messages }) => ({ body: { id, message: messages.at(-1) } }),
+  });
 
 function wroteWiki(message: WikiUIMessage) {
   return message.parts.some((p) => isToolUIPart(p) && WRITES.has(getToolName(p)) && p.state === "output-available");
 }
 
-function Message({ message, onRespond }: { message: WikiUIMessage; onRespond: (id: string, approved: boolean) => void }) {
+function Message({ slug, message, onRespond }: { slug: string; message: WikiUIMessage; onRespond: (id: string, approved: boolean) => void }) {
   if (message.role === "user") {
     return (
       <div className="ml-6 self-end whitespace-pre-wrap break-words rounded-lg bg-surface-2 px-3 py-2 text-sm">
@@ -48,7 +51,7 @@ function Message({ message, onRespond }: { message: WikiUIMessage; onRespond: (i
         if (part.type === "text") {
           return (
             <div key={i} className="min-w-0 break-words [&_pre]:overflow-x-auto">
-              <Markdown>{part.text}</Markdown>
+              <Markdown wikiSlug={slug}>{part.text}</Markdown>
             </div>
           );
         }
@@ -62,16 +65,18 @@ function Message({ message, onRespond }: { message: WikiUIMessage; onRespond: (i
 }
 
 export function ChatThread({ chatId, initialMessages }: { chatId: string; initialMessages: WikiUIMessage[] }) {
+  const { slug } = useWiki();
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
+  const transport = useMemo(() => makeTransport(slug), [slug]);
   const { messages, sendMessage, status, error, stop, regenerate, addToolApprovalResponse, clearError } = useChat<WikiUIMessage>({
     id: chatId,
     messages: initialMessages,
     transport,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: ({ message }) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chat.list() });
-      if (wroteWiki(message)) void queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat.list(slug) });
+      if (wroteWiki(message)) void queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all(slug) });
     },
   });
   const busy = status === "submitted" || status === "streaming";
@@ -98,7 +103,7 @@ export function ChatThread({ chatId, initialMessages }: { chatId: string; initia
             <p className="py-8 text-center text-sm text-muted">Ask about the code, or ask me to edit the wiki.</p>
           )}
           {messages.map((m) => (
-            <Message key={m.id} message={m} onRespond={(id, approved) => void addToolApprovalResponse({ id, approved })} />
+            <Message key={m.id} slug={slug} message={m} onRespond={(id, approved) => void addToolApprovalResponse({ id, approved })} />
           ))}
           {status === "submitted" && <p className="text-xs text-muted">Thinking…</p>}
           {error && (
@@ -122,7 +127,7 @@ export function ChatThread({ chatId, initialMessages }: { chatId: string; initia
           className="min-h-0 flex-1 resize-none rounded-md border border-line bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
         />
         {busy ? (
-          <button type="button" onClick={() => void Promise.all([chatApi.stop(chatId), stop()])} title="Stop" className="rounded-md border border-line p-2">
+          <button type="button" onClick={() => void Promise.all([chatApi.stop(slug, chatId), stop()])} title="Stop" className="rounded-md border border-line p-2">
             <Square className="size-4" />
           </button>
         ) : (

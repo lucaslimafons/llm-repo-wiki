@@ -6,6 +6,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { SearchToolOutput, WikiTools } from "@/agent/tools";
 import type { InferUITools } from "ai";
+import { useWiki } from "@/components/wikis/WikiContext";
+import { wikiBase } from "@/wiki/routes";
 import { PageDiff } from "./PageDiff";
 
 export type ToolUIPartOfWiki = ToolUIPart<InferUITools<WikiTools>> | DynamicToolUIPart;
@@ -46,6 +48,7 @@ export function ToolPart({
   part: Part;
   onRespond: (approvalId: string, approved: boolean) => void;
 }) {
+  const { slug } = useWiki();
   const name = getToolName(part);
   const input = part.input as Input;
   const { icon, label } = describe(name, input, part.state === "output-available" ? part.output : undefined);
@@ -101,7 +104,7 @@ export function ToolPart({
       <span className="mt-px shrink-0">{icon}</span>
       <span className="min-w-0 flex-1 break-words">{label}</span>
       {name === "searchKnowledge" && part.state === "output-available" && str(input?.query) && (
-        <Link href={`/explain?q=${encodeURIComponent(str(input?.query))}`} className="shrink-0 text-accent hover:underline">
+        <Link href={`${wikiBase(slug)}/explain?q=${encodeURIComponent(str(input?.query))}`} className="shrink-0 text-accent hover:underline">
           How was this found?
         </Link>
       )}

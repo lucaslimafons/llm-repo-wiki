@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import { repos } from "@/db/schema";
+import { createWiki, getWikiBySlug } from "@/wikis/wikis";
 import { createGitHubClient } from "@/github/client";
 import { parseRepoFullName } from "@/github/repo-name";
 import { createDefaultChunker } from "@/ingest/chunk";
@@ -51,8 +52,15 @@ async function main() {
   const embedder = createOpenRouterEmbedder({ apiKey: openRouterKey(), model: env().EMBEDDING_MODEL, ...providerPrivacy() });
 
   // Pin the repo to the golden commit so the expected paths are guaranteed to exist.
+  // A repo lives in one wiki: reuse the golden repo wherever it is, else put it in an "eval" wiki.
   let [repo] = await database.select().from(repos).where(and(eq(repos.owner, ref.owner), eq(repos.name, ref.name)));
-  repo ??= (await database.insert(repos).values({ ...ref, desiredSha: golden.sha }).returning())[0];
+  if (!repo) {
+    const existing = await getWikiBySlug(database, "eval");
+    const created = existing ? null : await createWiki(database, { name: "eval" });
+    if (created && !created.ok) throw new Error(created.error);
+    const wikiId = existing?.id ?? (created as { ok: true; data: { id: string } }).data.id;
+    repo = (await database.insert(repos).values({ ...ref, wikiId, desiredSha: golden.sha }).returning())[0];
+  }
   if (repo.syncedSha !== golden.sha) {
     console.log(`syncing ${golden.repo}@${golden.sha.slice(0, 7)}…`);
     await database.update(repos).set({ desiredSha: golden.sha }).where(eq(repos.id, repo.id));
@@ -81,7 +89,7 @@ async function main() {
     for (const { q, expected } of golden.questions) {
       const t0 = performance.now();
       let hits: SearchHit[] = await searchWithMode(
-        { query: q, scope: "source", repo: golden.repo, limit: st.rerank ? RERANK_POOL : K_MRR },
+        { wikiId: repo.wikiId, query: q, scope: "source", repo: golden.repo, limit: st.rerank ? RERANK_POOL : K_MRR },
         st.mode,
         { db: database, embedder },
         st.weights,

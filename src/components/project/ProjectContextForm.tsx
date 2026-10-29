@@ -2,44 +2,60 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { LAYOUT_OPTIONS } from "@/components/project/layouts";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { saveProjectContextAction } from "@/project/actions";
+import { MAX_WIKI_NAME_CHARS } from "@/wikis/schema";
 import { MAX_CONTEXT_CHARS, MAX_ROLE_CHARS, type ProjectContext, type ProjectContextInput, type WikiLayout } from "@/project/schema";
 
-const LAYOUTS: { value: WikiLayout; label: string; hint: string }[] = [
-  { value: "topic", label: "By topic", hint: "One shared tree; each repo's subsystems under Architecture/<part>. For repos that ship as one product." },
-  { value: "repo", label: "By repository", hint: "A top-level folder per repo with its own Architecture, Guides and Reference. For repos read separately." },
-];
 
-const PLACEHOLDER = `Chef Hugo is a recipe app.
-recipe-mobile is the Expo app users cook with; recipe-site is the marketing website and its AWS hosting.
+const PLACEHOLDER = `Acme Shop is an online store.
+acme/shop-app is the mobile app customers buy with; acme/shop-site is the marketing website and its hosting.
 Write for a new engineer joining the team.`;
 
 export function ProjectContextForm({ initial }: { initial: ProjectContext }) {
+  const { slug } = useWiki();
+  const router = useRouter();
+  const [name, setName] = useState(initial.name);
   const [context, setContext] = useState(initial.context);
   const [layout, setLayout] = useState<WikiLayout>(initial.layout);
   const [roles, setRoles] = useState<Record<string, string>>(() => Object.fromEntries(initial.repos.map((r) => [r.id, r.role ?? ""])));
   const save = useMutation({
     mutationFn: async (input: ProjectContextInput) => {
-      const r = await saveProjectContextAction(input);
+      const r = await saveProjectContextAction(slug, input);
       if (!r.ok) throw new Error(r.error);
     },
+    // The sidebar shows the wiki's name: re-render it after a rename.
+    onSuccess: () => router.refresh(),
   });
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    save.mutate({ context, layout, roles: Object.entries(roles).map(([repoId, role]) => ({ repoId, role })) });
+    save.mutate({ name, context, layout, roles: Object.entries(roles).map(([repoId, role]) => ({ repoId, role })) });
   };
 
   return (
     <form onSubmit={onSubmit} className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-6 sm:px-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Project context</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Wiki settings</h1>
         <p className="mt-1 text-sm text-muted">
-          A short brief the author and chat agents read with every request: what the project is, how the repositories fit
-          together, and who the wiki is for. It applies from the next run on; existing pages are not rewritten.
+          The brief is what the author and chat agents read with every request: what the project is, how the repositories
+          fit together, and who the wiki is for. Changes apply from the next run on; existing pages are not rewritten.
         </p>
       </div>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="font-medium">Name</span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+          maxLength={MAX_WIKI_NAME_CHARS}
+          className="rounded border border-line bg-surface px-3 py-1.5 outline-none focus:border-accent"
+        />
+      </label>
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium">Brief</span>
@@ -59,7 +75,7 @@ export function ProjectContextForm({ initial }: { initial: ProjectContext }) {
       <fieldset className="flex flex-col gap-2 text-sm">
         <legend className="mb-1 font-medium">Wiki layout</legend>
         <p className="text-xs text-muted">Either way, the top-level Overview and Architecture describe the whole project.</p>
-        {LAYOUTS.map((l) => (
+        {LAYOUT_OPTIONS.map((l) => (
           <label key={l.value} className="flex items-start gap-2 rounded border border-line bg-surface px-3 py-2">
             <input type="radio" name="layout" value={l.value} checked={layout === l.value} onChange={() => setLayout(l.value)} className="mt-1" />
             <span className="min-w-0">

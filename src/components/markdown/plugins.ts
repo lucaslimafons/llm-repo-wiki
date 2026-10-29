@@ -1,6 +1,6 @@
 import { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
 import { githubBlobUrl, parseSourceHref, parseWikiHref } from "@/lib/source-links";
-import { wikiRoute } from "@/wiki/routes";
+import { wikiBase, wikiRoute } from "@/wiki/routes";
 
 /** The slice of hast these plugins touch; avoids depending on @types/hast directly. */
 export type HNode = {
@@ -40,7 +40,7 @@ function walk(node: HNode, fn: (n: HNode, parent: HNode | null, index: number) =
  * Before sanitize: rewrite `wiki:` and `source:` hrefs into routes and GitHub permalinks, which
  * sanitize then keeps. A `wiki:` id missing from a provided map loses its href (dead link).
  */
-export function rehypeWikiLinks(opts: { wikiPaths?: WikiPaths }) {
+export function rehypeWikiLinks(opts: { wikiSlug: string; wikiPaths?: WikiPaths }) {
   return (tree: HNode) => {
     walk(tree, (n) => {
       if (n.tagName !== "a" || typeof n.properties?.href !== "string") return;
@@ -48,9 +48,9 @@ export function rehypeWikiLinks(opts: { wikiPaths?: WikiPaths }) {
       const pageId = parseWikiHref(href);
       if (pageId) {
         const path = opts.wikiPaths ? opts.wikiPaths[pageId] : undefined;
-        if (path !== undefined) n.properties.href = wikiRoute(path);
+        if (path !== undefined) n.properties.href = wikiRoute(opts.wikiSlug, path);
         else if (opts.wikiPaths) delete n.properties.href;
-        else n.properties.href = `/page/${pageId}`;
+        else n.properties.href = `${wikiBase(opts.wikiSlug)}/page/${pageId}`;
         return;
       }
       if (href.startsWith("source:")) {

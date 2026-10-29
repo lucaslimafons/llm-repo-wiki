@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, FilePlus2, FileDiff, Search, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { decideRevisionsAction } from "@/app/(wiki)/actions";
+import { useWiki } from "@/components/wikis/WikiContext";
+import { decideRevisionsAction } from "@/app/w/[wiki]/actions";
 import type { BulkDecision } from "@/wiki/review";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { queryKeys } from "@/lib/query-keys";
@@ -20,23 +21,24 @@ const folderOf = (path: string) => (path.includes("/") ? path.slice(0, path.last
 
 /** The review queue: titles only, grouped by folder; a diff loads when a row is opened. */
 export function ProposalsQueue({ initialProposals }: { initialProposals: ProposalSummary[] }) {
+  const { slug } = useWiki();
   const queryClient = useQueryClient();
   const { data: proposals } = useQuery({
-    queryKey: queryKeys.wiki.proposals(),
-    queryFn: fetchProposals,
+    queryKey: queryKeys.wiki.proposals(slug),
+    queryFn: () => fetchProposals(slug),
     initialData: initialProposals,
   });
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const bulk = useMutation({
     mutationFn: async (accept: boolean): Promise<BulkDecision> => {
-      const res = await decideRevisionsAction({ revisionIds: [...selected], accept });
+      const res = await decideRevisionsAction({ wiki: slug, revisionIds: [...selected], accept });
       if (!res.ok) throw new Error(res.error);
       return res.data;
     },
     onSuccess: () => {
       setSelected(new Set());
-      return queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all });
+      return queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all(slug) });
     },
   });
 
@@ -145,6 +147,7 @@ export function ProposalsQueue({ initialProposals }: { initialProposals: Proposa
 }
 
 function ProposalRow({ proposal: p, checked, onCheck }: { proposal: ProposalSummary; checked: boolean; onCheck: (on: boolean) => void }) {
+  const { slug } = useWiki();
   const [open, setOpen] = useState(false);
   const reason = readableReason(p.reason);
   return (
@@ -155,7 +158,7 @@ function ProposalRow({ proposal: p, checked, onCheck }: { proposal: ProposalSumm
           <ChevronRight className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
         </button>
         {p.isNewPage ? <FilePlus2 className="size-4 shrink-0 text-accent" aria-label="New page" /> : <FileDiff className="size-4 shrink-0 text-muted" aria-label="Change" />}
-        <Link href={wikiRoute(p.pagePath)} className="min-w-0 font-medium break-all hover:text-accent">
+        <Link href={wikiRoute(slug, p.pagePath)} className="min-w-0 font-medium break-all hover:text-accent">
           {p.pagePath.split("/").at(-1)}
         </Link>
         <span className="text-xs text-muted">{p.citationCount} citations</span>
@@ -175,7 +178,8 @@ function ProposalRow({ proposal: p, checked, onCheck }: { proposal: ProposalSumm
 }
 
 function ProposalDetail({ revisionId }: { revisionId: string }) {
-  const detail = useQuery({ queryKey: queryKeys.wiki.proposal(revisionId), queryFn: () => fetchProposal(revisionId) });
+  const { slug } = useWiki();
+  const detail = useQuery({ queryKey: queryKeys.wiki.proposal(slug, revisionId), queryFn: () => fetchProposal(slug, revisionId) });
   if (detail.isPending) return <p className="mt-2 text-xs text-muted">Loading the change…</p>;
   if (detail.error) return <p className="mt-2 text-xs text-danger">{detail.error.message}</p>;
   const p = detail.data;

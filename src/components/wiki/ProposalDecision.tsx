@@ -2,18 +2,20 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
-import { acceptRevisionAction, rejectRevisionAction } from "@/app/(wiki)/actions";
+import { useWiki } from "@/components/wikis/WikiContext";
+import { acceptRevisionAction, rejectRevisionAction } from "@/app/w/[wiki]/actions";
 import { queryKeys } from "@/lib/query-keys";
 
 /** Accept / Reject for one proposal. The action refreshes server-rendered parts; the queries refetch. */
 export function ProposalDecision({ revisionId, outdated }: { revisionId: string; outdated: boolean }) {
+  const { slug } = useWiki();
   const queryClient = useQueryClient();
   const decide = useMutation({
     mutationFn: async (accept: boolean) => {
-      const res = accept ? await acceptRevisionAction({ revisionId }) : await rejectRevisionAction({ revisionId });
+      const res = accept ? await acceptRevisionAction({ wiki: slug, revisionId }) : await rejectRevisionAction({ wiki: slug, revisionId });
       if (!res.ok) throw new Error(res.error);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all(slug) }),
   });
   return (
     <div className="flex flex-wrap items-center gap-2">

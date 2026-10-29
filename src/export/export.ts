@@ -56,7 +56,7 @@ export function buildExport(rows: ExportPage[]): Map<string, string> {
   return new Map([...files].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-export async function loadExportPages(db: Db): Promise<ExportPage[]> {
+export async function loadExportPages(db: Db, wikiId: string): Promise<ExportPage[]> {
   const rows = await db
     .select({
       id: pages.id,
@@ -69,7 +69,8 @@ export async function loadExportPages(db: Db): Promise<ExportPage[]> {
       status: pageRevisions.status,
     })
     .from(pages)
-    .leftJoin(pageRevisions, eq(pageRevisions.id, pages.currentRevisionId));
+    .leftJoin(pageRevisions, eq(pageRevisions.id, pages.currentRevisionId))
+    .where(eq(pages.wikiId, wikiId));
   return rows.map((r) => ({
     ...r,
     currentRevisionId: r.status === "accepted" ? r.currentRevisionId : null,
@@ -79,7 +80,8 @@ export async function loadExportPages(db: Db): Promise<ExportPage[]> {
 }
 
 /** Writes the export. A non-empty `outDir` is refused unless `force`, which keeps only `.git`. */
-export async function exportWiki(db: Db, outDir: string, opts: { force?: boolean } = {}) {
+/** One wiki per export. */
+export async function exportWiki(db: Db, wikiId: string, outDir: string, opts: { force?: boolean } = {}) {
   const existing = await readdir(outDir).catch((err: NodeJS.ErrnoException) => {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -89,7 +91,7 @@ export async function exportWiki(db: Db, outDir: string, opts: { force?: boolean
     if (!opts.force) throw new Error(`${outDir} is not empty; pass --force to replace its contents (.git is kept)`);
     for (const entry of others) await rm(join(outDir, entry), { recursive: true, force: true });
   }
-  const files = buildExport(await loadExportPages(db));
+  const files = buildExport(await loadExportPages(db, wikiId));
   for (const [rel, content] of files) {
     const target = join(outDir, rel);
     await mkdir(dirname(target), { recursive: true });

@@ -5,19 +5,21 @@ import { RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { queryKeys } from "@/lib/query-keys";
-import { revertRevisionAction } from "@/app/(wiki)/actions";
+import { useWiki } from "@/components/wikis/WikiContext";
+import { revertRevisionAction } from "@/app/w/[wiki]/actions";
 import type { RevisionDetail } from "@/wiki/store";
-import { wikiRoute } from "@/wiki/routes";
+import { wikiBase, wikiRoute } from "@/wiki/routes";
 import { fetchRevisions } from "./api";
 import { Diff } from "./Diff";
 import { RevisionMeta } from "./RevisionMeta";
 
 /** Revisions newest first; the selected one is diffed against the revision it was written on. */
 export function HistoryView({ pageId, pagePath, initialRevisions }: { pageId: string; pagePath: string; initialRevisions: RevisionDetail[] }) {
+  const { slug } = useWiki();
   const queryClient = useQueryClient();
   const { data: revisions } = useQuery({
-    queryKey: queryKeys.wiki.revisions(pageId),
-    queryFn: () => fetchRevisions(pageId),
+    queryKey: queryKeys.wiki.revisions(slug, pageId),
+    queryFn: () => fetchRevisions(slug, pageId),
     initialData: initialRevisions,
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -26,13 +28,13 @@ export function HistoryView({ pageId, pagePath, initialRevisions }: { pageId: st
 
   const revert = useMutation({
     mutationFn: async (revisionId: string) => {
-      const res = await revertRevisionAction({ revisionId });
+      const res = await revertRevisionAction({ wiki: slug, revisionId });
       if (!res.ok) throw new Error(res.error);
       return res.data;
     },
     onSuccess: (data) => {
       setSelectedId(data.revisionId);
-      return queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all });
+      return queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all(slug) });
     },
   });
 
@@ -40,7 +42,7 @@ export function HistoryView({ pageId, pagePath, initialRevisions }: { pageId: st
     <div className="mx-auto max-w-5xl px-8 py-6">
       <p className="text-xs text-muted">History</p>
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">
-        <Link href={wikiRoute(pagePath)} className="hover:text-accent">
+        <Link href={wikiRoute(slug, pagePath)} className="hover:text-accent">
           {pagePath}
         </Link>
       </h1>
@@ -80,7 +82,7 @@ export function HistoryView({ pageId, pagePath, initialRevisions }: { pageId: st
                 </button>
               )}
               {selected.status === "proposed" && (
-                <Link href="/proposals" className="shrink-0 text-sm text-accent hover:underline">
+                <Link href={`${wikiBase(slug)}/proposals`} className="shrink-0 text-sm text-accent hover:underline">
                   Review proposal
                 </Link>
               )}

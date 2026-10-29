@@ -1,6 +1,6 @@
-import { desc, eq, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { agentRuns, repos, wikiLog } from "@/db/schema";
+import { agentRuns, pages, repos, wikiLog } from "@/db/schema";
 import { QUEUES } from "@/core/contracts";
 import { getRepoPipelines, type RepoPipeline } from "./pipeline";
 
@@ -50,20 +50,20 @@ const iso = (d: Date | string | null) => (d === null ? null : new Date(d).toISOS
 /** Per-step progress lives in the pipeline cards; the feed keeps the milestones. */
 const PROGRESS_EVENTS = ["author.page_started", "author.outline", "author.page_skipped", "sync.started", "sync.progress"];
 
-/** Everything the /jobs page shows, read live. Internal pg-boss queues and the poll tick are hidden. */
-export async function getJobsOverview(db: Db): Promise<JobsOverview> {
+/** Everything one wiki's /jobs page shows, read live. Internal pg-boss queues, the poll tick and the global lint are hidden. */
+export async function getJobsOverview(db: Db, wikiId: string): Promise<JobsOverview> {
   const [{ pipelines, runRepo }, jobs, runs, activity, total] = await Promise.all([
-    getRepoPipelines(db),
-    listQueueJobs(db),
-    db.select().from(agentRuns).orderBy(desc(agentRuns.startedAt)).limit(LIMIT),
+    getRepoPipelines(db, wikiId),
+    listQueueJobs(db, wikiId),
+    db.select().from(agentRuns).where(eq(agentRuns.wikiId, wikiId)).orderBy(desc(agentRuns.startedAt)).limit(LIMIT),
     db
       .select({ at: wikiLog.at, action: wikiLog.action, details: wikiLog.details, owner: repos.owner, name: repos.name })
       .from(wikiLog)
       .leftJoin(repos, eq(wikiLog.repoId, repos.id))
-      .where(notInArray(wikiLog.action, PROGRESS_EVENTS))
+      .where(and(eq(wikiLog.wikiId, wikiId), notInArray(wikiLog.action, PROGRESS_EVENTS)))
       .orderBy(desc(wikiLog.at))
       .limit(LIMIT),
-    db.select({ sum: sql<string>`coalesce(sum(${agentRuns.costUsd}), 0)` }).from(agentRuns),
+    db.select({ sum: sql<string>`coalesce(sum(${agentRuns.costUsd}), 0)` }).from(agentRuns).where(eq(agentRuns.wikiId, wikiId)),
   ]);
   const repoName = new Map(pipelines.map((p) => [p.repoId, p.fullName]));
   return {
@@ -94,7 +94,7 @@ export async function getJobsOverview(db: Db): Promise<JobsOverview> {
 }
 
 /** pg-boss creates its schema when the worker first starts, so a fresh database has no table yet. */
-async function listQueueJobs(db: Db): Promise<(Omit<QueueJob, "repo"> & { repoId: string | null })[]> {
+async function listQueueJobs(db: Db, wikiId: string): Promise<(Omit<QueueJob, "repo"> & { repoId: string | null })[]> {
   const exists = await db.execute<{ t: string | null }>(sql`select to_regclass('pgboss.job')::text as t`);
   if (!exists[0]?.t) return [];
   const rows = await db.execute<{
@@ -112,6 +112,8 @@ async function listQueueJobs(db: Db): Promise<(Omit<QueueJob, "repo"> & { repoId
       case when state = 'failed' then left(coalesce(output->>'message', output::text), 300) end as error
     from pgboss.job
     where name not like '\_\_pgboss%' and name <> ${QUEUES.pollRepos}
+      and (data->>'repoId' in (select id::text from ${repos} where wiki_id = ${wikiId}::uuid)
+        or data->>'pageId' in (select id::text from ${pages} where wiki_id = ${wikiId}::uuid))
     order by created_on desc
     limit ${LIMIT}`);
   return rows.map((r) => ({

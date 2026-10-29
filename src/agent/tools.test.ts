@@ -27,6 +27,7 @@ function setup(hits: SearchHit[] = [sourceHit()]) {
   const searches: unknown[] = [];
   const tools = createWikiTools({
     store: fake.store,
+    wikiSlug: "main",
     search: async (input) => {
       searches.push(input);
       return hits;

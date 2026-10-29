@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { jobsOverviewSchema } from "@/core/api-schemas";
 import type { JobsOverview } from "@/jobs/overview";
 import { fetchJson } from "@/lib/fetch-json";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
+import { apiBase } from "@/wiki/routes";
 import { PipelineCard } from "./PipelineCard";
 
 const BUSY_POLL_MS = 3000;
@@ -13,7 +15,7 @@ const IDLE_POLL_MS = 15000;
 const HIDDEN_DETAILS = new Set(["runId", "pageId", "parentId", "revisionId", "fromSha", "toSha"]);
 const MAX_DETAIL = 80;
 
-const fetchOverview = () => fetchJson("/api/jobs", jobsOverviewSchema);
+const fetchOverview = (slug: string) => fetchJson(`${apiBase(slug)}/jobs`, jobsOverviewSchema);
 
 const isBusy = (o: JobsOverview) =>
   o.pipelines.some((p) => p.sync.state === "running" || p.sync.state === "waiting" || p.author.state === "running" || p.author.state === "waiting") ||
@@ -21,9 +23,10 @@ const isBusy = (o: JobsOverview) =>
   o.runs.some((r) => r.status === "running");
 
 export function JobsView({ initial }: { initial: JobsOverview }) {
+  const { slug } = useWiki();
   const overview = useQuery({
-    queryKey: queryKeys.jobs.overview(),
-    queryFn: fetchOverview,
+    queryKey: queryKeys.jobs.overview(slug),
+    queryFn: () => fetchOverview(slug),
     initialData: initial,
     refetchInterval: (q) => (q.state.data && isBusy(q.state.data) ? BUSY_POLL_MS : IDLE_POLL_MS),
   });

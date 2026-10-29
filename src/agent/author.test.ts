@@ -3,8 +3,8 @@ import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SearchHit } from "@/core/contracts";
-import { agentRuns, projectSettings, repos, wikiLog } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { agentRuns, repos, wikiLog, wikis } from "@/db/schema";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { collectCitations, groundDraft, runAuthorJob, type AuthorDeps } from "./author";
 import { createFakeStore } from "./testing/fake-store";
 import { usage } from "./testing/mock-model";
@@ -46,13 +46,14 @@ function authorModel(outline: string[], drafts: (title: string) => { bodyMd: str
 }
 
 let repoId: string;
+let wikiId: string;
 const searches: unknown[] = [];
 
 function deps(model: MockLanguageModelV4, fake = createFakeStore(), extra: Partial<AuthorDeps> = {}) {
   const d: AuthorDeps = {
     db: testDb(),
-    store: fake.store,
-    search: async (input) => (searches.push(input), [hit]),
+    storeFor: () => fake.store,
+    searchFor: () => async (input) => (searches.push(input), [hit]),
     model,
     loadSchema: async () => "# schema",
     ...extra,
@@ -68,7 +69,8 @@ const goodDraft = (title: string) => ({
 beforeEach(async () => {
   await resetDb();
   searches.length = 0;
-  const [repo] = await testDb().insert(repos).values({ owner: "acme", name: "api" }).returning();
+  wikiId = await createTestWiki();
+  const [repo] = await testDb().insert(repos).values({ wikiId, owner: "acme", name: "api" }).returning();
   repoId = repo.id;
 });
 
@@ -323,8 +325,8 @@ describe("author-wiki: one project, several repos", () => {
 
   it("puts the owner's project context and the other repos into the outline", async () => {
     const db = testDb();
-    const [web] = await db.insert(repos).values({ owner: "acme", name: "web", role: "marketing website" }).returning();
-    await db.insert(projectSettings).values({ id: 1, context: "Acme is one product." });
+    const [web] = await db.insert(repos).values({ wikiId, owner: "acme", name: "web", role: "marketing website" }).returning();
+    await db.update(wikis).set({ context: "Acme is one product." }).where(eq(wikis.id, wikiId));
     const prompts: string[] = [];
     const base = authorModel(["Overview"], goodDraft);
     const model = new MockLanguageModelV4({

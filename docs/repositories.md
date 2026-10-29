@@ -11,7 +11,7 @@ Public repos work without a token. For private ones, give the worker read-only a
    token before it works.
 2. Add it to `.env.local` as `GITHUB_TOKEN=github_pat_...`.
 3. Restart `pnpm worker` and `pnpm dev`, because both read the environment at start.
-4. Add each repo with `pnpm repo:add owner/name`, or the sidebar's **Add repository** box.
+4. Add each repo with the sidebar's **Add repository** box, or `pnpm repo:add owner/name --wiki <slug>`.
 
 Before adding private code, read [what leaves your machine](privacy.md).
 
@@ -31,7 +31,7 @@ your fine-grained token: GitHub does not list that account as a resource owner. 
 ## Several repos, one project
 
 The wiki documents one project, even when it spans several repos (an app and its website, say).
-Before adding the repos, open **Project context** in the Repositories panel and write a short brief:
+Create one wiki for the project. Before adding the repos, open the wiki's **Settings** and write a short brief:
 what the project is, what each repo is for, and who the wiki is for. Give each repo a one-line role,
 and pick a layout: **by topic** (one shared tree, each repo's subsystems under `Architecture/<part>`)
 or **by repository** (a top-level folder per repo). Either way the top-level `Overview` and
@@ -43,5 +43,14 @@ repo already wrote, the author proposes an update that adds this repo's side and
 existing citations, instead of skipping the topic. The brief is the owner's intent, not a source:
 every fact on a page still has to cite code.
 
-One instance holds one project's wiki. Several isolated wikis per instance are tracked in
-[#7](https://github.com/lucaslimafons/llm-repo-wiki/issues/7).
+## Several projects, several wikis
+
+Unrelated projects go in separate wikis, and `/` lists them. A wiki is isolated: search, chat, the
+author's evidence, lint, export, the Jobs page and the MCP server only ever see its own repos and
+pages. Without that, adding a second project would leak its code into the first project's pages.
+
+A repo belongs to exactly one wiki, because the same repo in two would be indexed and paid for twice.
+Adding a repo that another wiki already holds is refused and names that wiki. Deleting a wiki, under
+**Settings**, deletes its repos' index, pages, proposals, chats and history.
+
+An existing install keeps its data: the migration moves everything into a wiki named `default`.

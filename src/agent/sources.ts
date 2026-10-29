@@ -5,8 +5,8 @@ import { formatSourceHref, githubBlobUrl } from "@/lib/source-links";
 export type HitSource = { sourceId: string; url: string; title: string };
 
 /** App URL of a wiki page by display path (the wiki owns the route shape). */
-export function wikiPageUrl(pagePath: string): string {
-  return wikiRoute(pagePath);
+export function wikiPageUrl(wikiSlug: string, pagePath: string): string {
+  return wikiRoute(wikiSlug, pagePath);
 }
 
 function lineSuffix(start: number, end: number) {
@@ -14,7 +14,7 @@ function lineSuffix(start: number, end: number) {
 }
 
 /** A search hit as a citable source: GitHub permalink at the exact sha + lines, or a wiki page. */
-export function hitToSource(hit: SearchHit): HitSource {
+export function hitToSource(hit: SearchHit, wikiSlug: string): HitSource {
   if (hit.kind === "source") {
     const citation = {
       repo: hit.repo,
@@ -31,7 +31,7 @@ export function hitToSource(hit: SearchHit): HitSource {
   }
   return {
     sourceId: `wiki:${hit.pageId}${hit.headingPath ? `#${hit.headingPath}` : ""}`,
-    url: wikiPageUrl(hit.pagePath),
+    url: wikiPageUrl(wikiSlug, hit.pagePath),
     title: `wiki/${hit.pagePath}${hit.headingPath ? ` › ${hit.headingPath}` : ""}`,
   };
 }

@@ -1,18 +1,23 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { repos } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { formatProjectContext, getProjectContext, saveProjectContext } from "./context";
 import { MAX_CONTEXT_CHARS } from "./schema";
 
 const db = testDb();
 const UNKNOWN = "11111111-1111-4111-8111-111111111111";
+let wikiId: string;
 
 describe("project context", () => {
-  beforeEach(resetDb);
+  beforeEach(async () => {
+    await resetDb();
+    wikiId = await createTestWiki();
+  });
 
   it("is empty until saved, and then round-trips with each repo's role", async () => {
-    const [mobile, site] = await db.insert(repos).values([{ owner: "acme", name: "mobile" }, { owner: "acme", name: "site" }]).returning();
-    expect(await getProjectContext(db)).toEqual({
+    const [mobile, site] = await db.insert(repos).values([{ wikiId, owner: "acme", name: "mobile" }, { wikiId, owner: "acme", name: "site" }]).returning();
+    expect(await getProjectContext(db, wikiId)).toEqual({
+      name: "main",
       context: "",
       layout: "topic",
       repos: [
@@ -21,7 +26,7 @@ describe("project context", () => {
       ],
     });
 
-    const saved = await saveProjectContext(db, {
+    const saved = await saveProjectContext(db, wikiId, { name: "main",
       context: "  One recipe product.  ",
       layout: "repo",
       roles: [
@@ -31,7 +36,8 @@ describe("project context", () => {
       ],
     });
     expect(saved).toEqual({ ok: true, data: undefined });
-    expect(await getProjectContext(db)).toEqual({
+    expect(await getProjectContext(db, wikiId)).toEqual({
+      name: "main",
       context: "One recipe product.",
       layout: "repo",
       repos: [
@@ -40,21 +46,21 @@ describe("project context", () => {
       ],
     });
 
-    await saveProjectContext(db, { context: "Edited.", layout: "topic", roles: [] });
-    expect((await getProjectContext(db)).context).toBe("Edited.");
+    await saveProjectContext(db, wikiId, { name: "main", context: "Edited.", layout: "topic", roles: [] });
+    expect((await getProjectContext(db, wikiId)).context).toBe("Edited.");
   });
 
   it("refuses an over-long brief or a malformed repo id without writing", async () => {
-    expect((await saveProjectContext(db, { context: "x".repeat(MAX_CONTEXT_CHARS + 1), layout: "topic", roles: [] })).ok).toBe(false);
-    expect((await saveProjectContext(db, { context: "ok", layout: "topic", roles: [{ repoId: "not-a-uuid", role: "x" }] })).ok).toBe(false);
-    expect((await saveProjectContext(db, { context: "ok", layout: "per-team", roles: [] })).ok).toBe(false);
-    expect((await getProjectContext(db)).context).toBe("");
+    expect((await saveProjectContext(db, wikiId, { name: "main", context: "x".repeat(MAX_CONTEXT_CHARS + 1), layout: "topic", roles: [] })).ok).toBe(false);
+    expect((await saveProjectContext(db, wikiId, { name: "main", context: "ok", layout: "topic", roles: [{ repoId: "not-a-uuid", role: "x" }] })).ok).toBe(false);
+    expect((await saveProjectContext(db, wikiId, { name: "main", context: "ok", layout: "per-team", roles: [] })).ok).toBe(false);
+    expect((await getProjectContext(db, wikiId)).context).toBe("");
   });
 });
 
 describe("formatProjectContext", () => {
   it("is null for a lone repo the owner said nothing about", () => {
-    expect(formatProjectContext({ context: "", layout: "topic", repos: [{ id: "a", fullName: "acme/mobile", role: null }] })).toBeNull();
+    expect(formatProjectContext({ name: "main", context: "", layout: "topic", repos: [{ id: "a", fullName: "acme/mobile", role: null }] })).toBeNull();
   });
 
   it("always asks for a project-level Overview and Architecture, then the chosen layout", () => {
@@ -62,8 +68,8 @@ describe("formatProjectContext", () => {
       { id: "a", fullName: "acme/mobile", role: null },
       { id: "b", fullName: "acme/site", role: null },
     ];
-    const topic = formatProjectContext({ context: "", layout: "topic", repos })!;
-    const byRepo = formatProjectContext({ context: "", layout: "repo", repos })!;
+    const topic = formatProjectContext({ name: "main", context: "", layout: "topic", repos })!;
+    const byRepo = formatProjectContext({ name: "main", context: "", layout: "repo", repos })!;
     for (const text of [topic, byRepo]) expect(text).toContain("describe the WHOLE project");
     expect(topic).toContain("Layout: BY TOPIC");
     expect(byRepo).toContain("Layout: BY REPOSITORY");
@@ -72,6 +78,7 @@ describe("formatProjectContext", () => {
 
   it("lists every repo with its role under the brief", () => {
     const text = formatProjectContext({
+      name: "main",
       context: "One recipe product.",
       layout: "topic",
       repos: [

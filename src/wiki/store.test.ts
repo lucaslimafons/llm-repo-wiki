@@ -2,15 +2,14 @@ import { asc, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Author, Citation } from "@/core/contracts";
 import { agentRuns, pageRevisions, pages, repos, wikiLog } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { WikiError } from "./errors";
-import { createWikiStore } from "./store";
+import { createWikiStore, type WikiStoreExt } from "./store";
 
 const human: Author = { kind: "human" };
 let enqueued: { pageId: string; revisionId: string }[] = [];
-const store = createWikiStore(testDb(), {
-  enqueueIndexPage: async (job) => void enqueued.push(job),
-});
+let wikiId: string;
+let store: WikiStoreExt;
 
 const cite = (path: string, extra: Partial<Citation> = {}): Citation => ({
   repo: "acme/api",
@@ -52,7 +51,9 @@ let repoId: string;
 beforeEach(async () => {
   await resetDb();
   enqueued = [];
-  [{ id: repoId }] = await testDb().insert(repos).values({ owner: "acme", name: "api" }).returning({ id: repos.id });
+  wikiId = await createTestWiki();
+  store = createWikiStore(testDb(), { wikiId, enqueueIndexPage: async (job) => void enqueued.push(job) });
+  [{ id: repoId }] = await testDb().insert(repos).values({ wikiId, owner: "acme", name: "api" }).returning({ id: repos.id });
 });
 
 describe("tree", () => {
@@ -226,7 +227,7 @@ describe("markStaleByFiles", () => {
 
 describe("wiki_log", () => {
   it("appends one row per write with the author's kind", async () => {
-    const [run] = await testDb().insert(agentRuns).values({ kind: "author", model: "m" }).returning();
+    const [run] = await testDb().insert(agentRuns).values({ wikiId, kind: "author", model: "m" }).returning();
     const agent: Author = { kind: "agent", agentRunId: run.id };
     const a = await page("A");
     const b = await page("B");

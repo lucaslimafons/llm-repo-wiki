@@ -8,12 +8,17 @@
 export type SearchScope = "source" | "wiki" | "all";
 
 export type SearchInput = {
+  /** Required: search never crosses wikis, so there is no "every wiki" default to forget. */
+  wikiId: string;
   query: string;
   scope: SearchScope;
-  /** "owner/name". Omit to search every repo. */
+  /** "owner/name". Omit to search every repo of the wiki. */
   repo?: string;
   limit?: number;
 };
+
+/** Search already bound to one wiki: what agents and tools get, so they cannot reach another. */
+export type ScopedSearch = (input: Omit<SearchInput, "wikiId">) => Promise<SearchHit[]>;
 
 export type SourceHit = {
   kind: "source";

@@ -12,7 +12,13 @@ export async function registerAgentJobs(boss: PgBoss): Promise<void> {
   await boss.work<AuthorPayload>(QUEUES.authorWiki, async (jobs) => {
     for (const job of jobs) {
       const result = await runAuthorJob(
-        { db: db(), store: wikiStore, search: searchKnowledge, model: authorModel(), tokenBudget: env().AUTHOR_TOKEN_BUDGET },
+        {
+          db: db(),
+          storeFor: wikiStore,
+          searchFor: (wikiId) => (input) => searchKnowledge({ ...input, wikiId }),
+          model: authorModel(),
+          tokenBudget: env().AUTHOR_TOKEN_BUDGET,
+        },
         job.data,
       );
       console.log(`[author-wiki] ${job.data.repoId}: ${result.mode}, ${result.proposed.length} proposed, ${result.dropped.length} dropped`);

@@ -1,6 +1,6 @@
 import { tool, type InferUITools, type UIDataTypes, type UIMessage } from "ai";
 import { z } from "zod";
-import type { Author, SearchHit, SearchInput, TreeNode, WikiStore, WriteMode } from "@/core/contracts";
+import type { Author, ScopedSearch, SearchHit, TreeNode, WikiStore, WriteMode } from "@/core/contracts";
 import { formatSourceHref } from "@/lib/source-links";
 import { wrapRetrieved } from "./retrieved";
 import { hitToSource, type HitSource } from "./sources";
@@ -14,7 +14,9 @@ import {
 
 export type WikiToolDeps = {
   store: WikiStore;
-  search: (input: SearchInput) => Promise<SearchHit[]>;
+  /** For wiki-page source links; chats store them with the message. */
+  wikiSlug: string;
+  search: ScopedSearch;
   author: Author;
   mode: WriteMode;
 };
@@ -100,7 +102,7 @@ export function createWikiTools(deps: WikiToolDeps) {
             ref: i + 1,
             kind: hit.kind,
             cite: hitCite(hit),
-            source: hitToSource(hit),
+            source: hitToSource(hit, deps.wikiSlug),
             content: hit.content.slice(0, MAX_HIT_CHARS),
           })),
         };

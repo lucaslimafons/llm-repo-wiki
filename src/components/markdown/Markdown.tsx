@@ -18,6 +18,8 @@ export type CodeRenderer = (code: string, lang: string | null) => ReactNode;
 
 export type MarkdownProps = {
   children: string;
+  /** The wiki whose routes `wiki:` links resolve to. */
+  wikiSlug: string;
   /** id → display path, to link `wiki:` ids directly and mark dead ones. Omit in chat. */
   wikiPaths?: WikiPaths;
   className?: string;
@@ -87,12 +89,12 @@ function components(renderCode?: CodeRenderer): Components {
  * Sanitized GFM markdown with wiki/source link resolution, `[[_TOC_]]` and lazy mermaid.
  * Safe in client components (chat) and server components alike; never renders raw HTML.
  */
-export function Markdown({ children, wikiPaths, className, renderCode }: MarkdownProps) {
+export function Markdown({ children, wikiSlug, wikiPaths, className, renderCode }: MarkdownProps) {
   return (
     <div className={className ? `${PROSE} ${className}` : PROSE}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeWikiLinks, { wikiPaths }], [rehypeSanitize, sanitizeSchema], rehypeHeadingsAndToc]}
+        rehypePlugins={[[rehypeWikiLinks, { wikiSlug, wikiPaths }], [rehypeSanitize, sanitizeSchema], rehypeHeadingsAndToc]}
         components={components(renderCode)}
       >
         {normalizeAdoMarkdown(children)}

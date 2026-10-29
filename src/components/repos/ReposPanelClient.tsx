@@ -1,18 +1,20 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, CheckCircle2, Clock, GitBranch, Loader2, NotebookText, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, GitBranch, Loader2, Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { addRepoAction, removeRepoAction, syncRepoNowAction } from "@/ingest/actions";
 import type { ActionResult, RepoListItem } from "@/ingest/repos";
 import { repoListSchema } from "@/core/api-schemas";
 import { fetchJson } from "@/lib/fetch-json";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
+import { apiBase, wikiBase } from "@/wiki/routes";
 
 const POLL_MS = 2000;
 
-const fetchRepos = () => fetchJson("/api/repos", repoListSchema);
+const fetchRepos = (slug: string) => fetchJson(`${apiBase(slug)}/repos`, repoListSchema);
 
 /** Unwraps an action result so a refusal surfaces as a mutation error, not a silent success. */
 async function unwrap<T>(p: Promise<ActionResult<T>>): Promise<T> {
@@ -24,26 +26,27 @@ async function unwrap<T>(p: Promise<ActionResult<T>>): Promise<T> {
 const isBusy = (r: RepoListItem) => r.status === "queued" || r.status === "syncing";
 
 export function ReposPanelClient({ initialRepos }: { initialRepos: RepoListItem[] | null }) {
+  const { slug } = useWiki();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const repos = useQuery({
-    queryKey: queryKeys.repos.list(),
-    queryFn: fetchRepos,
+    queryKey: queryKeys.repos.list(slug),
+    queryFn: () => fetchRepos(slug),
     initialData: initialRepos ?? undefined,
     // Poll only while some sync is pending; an idle sidebar makes no requests.
     refetchInterval: (q) => (q.state.data?.some(isBusy) ? POLL_MS : false),
   });
-  const invalidate = () => qc.invalidateQueries({ queryKey: queryKeys.repos.all });
+  const invalidate = () => qc.invalidateQueries({ queryKey: queryKeys.repos.all(slug) });
 
   const add = useMutation({
-    mutationFn: (fullName: string) => unwrap(addRepoAction(fullName)),
+    mutationFn: (fullName: string) => unwrap(addRepoAction(slug, fullName)),
     onSuccess: () => {
       setName("");
       return invalidate();
     },
   });
-  const sync = useMutation({ mutationFn: (id: string) => unwrap(syncRepoNowAction(id)), onSettled: invalidate });
-  const remove = useMutation({ mutationFn: (id: string) => unwrap(removeRepoAction(id)), onSettled: invalidate });
+  const sync = useMutation({ mutationFn: (id: string) => unwrap(syncRepoNowAction(slug, id)), onSettled: invalidate });
+  const remove = useMutation({ mutationFn: (id: string) => unwrap(removeRepoAction(slug, id)), onSettled: invalidate });
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -58,9 +61,9 @@ export function ReposPanelClient({ initialRepos }: { initialRepos: RepoListItem[
     <section className="flex flex-col gap-2 border-t border-line p-3 text-sm">
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Repositories</h2>
-        <Link href="/project" className="flex items-center gap-1 text-xs text-muted hover:text-accent">
-          <NotebookText className="size-3.5" />
-          Project context
+        <Link href={`${wikiBase(slug)}/settings`} className="flex items-center gap-1 text-xs text-muted hover:text-accent">
+          <Settings className="size-3.5" />
+          Settings
         </Link>
       </div>
 

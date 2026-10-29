@@ -2,12 +2,13 @@ import { asc, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobPayloads } from "@/core/contracts";
 import { chunks, repos, sourceFiles, wikiLog } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { createDefaultChunker } from "./chunk";
 import { syncRepo, type SyncDeps } from "./sync";
 import { fakeEmbedder, fakeGitHub, sha, type Snapshot } from "./test-helpers";
 
 const db = testDb();
+let wikiId: string;
 const chunker = createDefaultChunker();
 
 const readme = `# Widgets
@@ -27,7 +28,7 @@ const code = `export function makeWidget(name: string) {\n  return { name };\n}\
 async function addRepo(desired: string) {
   const [row] = await db
     .insert(repos)
-    .values({ owner: "acme", name: "widgets", defaultBranch: "main", desiredSha: desired, status: "queued" })
+    .values({ wikiId, owner: "acme", name: "widgets", defaultBranch: "main", desiredSha: desired, status: "queued" })
     .returning();
   return row.id;
 }
@@ -58,7 +59,10 @@ const chunkRows = (repoId: string) =>
 const repoRow = async (id: string) => (await db.select().from(repos).where(eq(repos.id, id)))[0];
 
 describe("syncRepo", () => {
-  beforeEach(resetDb);
+  beforeEach(async () => {
+    await resetDb();
+    wikiId = await createTestWiki();
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("first sync is full: indexes every file, advances synced_sha, logs, and asks for authoring", async () => {

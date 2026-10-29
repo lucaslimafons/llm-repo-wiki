@@ -1,39 +1,56 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { projectSettings, repos } from "@/db/schema";
+import { repos, wikis } from "@/db/schema";
 import type { ActionResult } from "@/ingest/repos";
+import { describeIssues } from "@/lib/zod-issues";
 import { projectContextInputSchema, WIKI_LAYOUTS, type ProjectContext, type WikiLayout } from "./schema";
 
-export async function getProjectContext(db: Db): Promise<ProjectContext> {
+/** The wiki's brief, layout and its repos' roles. */
+export async function getProjectContext(db: Db, wikiId: string): Promise<ProjectContext> {
   const [settings, repoRows] = await Promise.all([
-    db.select({ context: projectSettings.context, layout: projectSettings.layout }).from(projectSettings).where(eq(projectSettings.id, 1)),
-    db.select({ id: repos.id, owner: repos.owner, name: repos.name, role: repos.role }).from(repos).orderBy(asc(repos.owner), asc(repos.name)),
+    db.select({ name: wikis.name, context: wikis.context, layout: wikis.layout }).from(wikis).where(eq(wikis.id, wikiId)),
+    db
+      .select({ id: repos.id, owner: repos.owner, name: repos.name, role: repos.role })
+      .from(repos)
+      .where(eq(repos.wikiId, wikiId))
+      .orderBy(asc(repos.owner), asc(repos.name)),
   ]);
   return {
+    name: settings[0]?.name ?? "",
     context: settings[0]?.context ?? "",
     layout: WIKI_LAYOUTS.find((l) => l === settings[0]?.layout) ?? "topic",
     repos: repoRows.map((r) => ({ id: r.id, fullName: `${r.owner}/${r.name}`, role: r.role })),
   };
 }
 
-export async function saveProjectContext(db: Db, input: unknown): Promise<ActionResult> {
+export async function saveProjectContext(db: Db, wikiId: string, input: unknown): Promise<ActionResult> {
   const parsed = projectContextInputSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: `Invalid project context: ${parsed.error.issues[0]?.message}` };
-  const { context, layout, roles } = parsed.data;
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(projectSettings)
-      .values({ id: 1, context, layout })
-      .onConflictDoUpdate({ target: projectSettings.id, set: { context, layout, updatedAt: new Date() } });
-    // Only repos that exist: an unknown id is ignored rather than trusted.
+  if (!parsed.success) return { ok: false, error: `Invalid settings: ${describeIssues(parsed.error)}` };
+  const { name, context, layout, roles } = parsed.data;
+  const saved = await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(wikis)
+      .set({ name, context, layout, updatedAt: new Date() })
+      .where(eq(wikis.id, wikiId))
+      .returning({ id: wikis.id });
+    if (updated.length === 0) return false;
+    // Only this wiki's repos: an unknown or foreign id is ignored rather than trusted.
     const known = roles.length
-      ? new Set((await tx.select({ id: repos.id }).from(repos).where(inArray(repos.id, roles.map((r) => r.repoId)))).map((r) => r.id))
+      ? new Set(
+          (
+            await tx
+              .select({ id: repos.id })
+              .from(repos)
+              .where(and(eq(repos.wikiId, wikiId), inArray(repos.id, roles.map((r) => r.repoId))))
+          ).map((r) => r.id),
+        )
       : new Set<string>();
     for (const r of roles.filter((r) => known.has(r.repoId))) {
       await tx.update(repos).set({ role: r.role || null }).where(eq(repos.id, r.repoId));
     }
+    return true;
   });
-  return { ok: true, data: undefined };
+  return saved ? { ok: true, data: undefined } : { ok: false, error: "Wiki not found." };
 }
 
 const PROJECT_LEVEL = `Whatever the layout, the top-level \`Overview\` and \`Architecture\` pages describe the WHOLE project: what each repository does and how they connect (an \`Architecture\` mermaid graph of the parts and the calls between them).`;

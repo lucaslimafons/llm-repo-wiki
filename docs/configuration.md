@@ -39,11 +39,11 @@ Only a `push` to the default branch triggers a sync. A merged PR produces exactl
 | `pnpm db:setup` | Start Postgres in Docker and run migrations. Not `pnpm setup`, which is a pnpm built-in |
 | `pnpm db:reset` | **Delete all data** (repos, wiki, chats) and start from an empty schema |
 | `pnpm dev` / `pnpm worker` | Web app / background job worker |
-| `pnpm repo:add owner/name` | Add a repo and queue its first sync |
-| `pnpm export --out <dir>` | Write the accepted wiki as a folder of markdown that renders on GitHub |
+| `pnpm repo:add owner/name [--wiki <slug>]` | Add a repo to a wiki and queue its first sync |
+| `pnpm export --out <dir> [--wiki <slug>]` | Write a wiki's accepted pages as a folder of markdown that renders on GitHub |
 | `pnpm eval` | Retrieval eval: 8 search strategies, recall@5 and MRR |
 | `pnpm bench:chat`, `pnpm bench:author` | Compare models on the real chat agent and author job |
-| `pnpm mcp` / `pnpm mcp:smoke "question"` | Run the MCP server over stdio / check it end to end as a client would |
+| `pnpm mcp --wiki <slug>` / `pnpm mcp:smoke "question" --wiki <slug>` | Run the MCP server for one wiki over stdio / check it end to end as a client would |
 | `pnpm bench:mcp` | Claude Code with vs. without the MCP server ([how it works](mcp.md#measuring-it)) |
 | `pnpm test` / `pnpm typecheck` / `pnpm lint` | Tests against a real Postgres, plus checks |
 

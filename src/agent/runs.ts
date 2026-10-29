@@ -20,7 +20,7 @@ export type AgentRun = {
   finish(result: { status: "succeeded" | "failed" | "budget_exceeded" | "stopped"; error?: unknown }): Promise<void>;
 };
 
-export async function startAgentRun(db: Db, input: { kind: AgentRunKind; model: string }): Promise<AgentRun> {
+export async function startAgentRun(db: Db, input: { wikiId: string; kind: AgentRunKind; model: string }): Promise<AgentRun> {
   const [row] = await db.insert(agentRuns).values(input).returning({ id: agentRuns.id });
   const totals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let finished = false;

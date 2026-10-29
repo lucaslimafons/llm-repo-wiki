@@ -2,7 +2,7 @@ import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { SearchHit, SearchInput, SourceHit, WikiHit } from "@/core/contracts";
 import { db as defaultDb, type Db } from "@/db/client";
-import { chunks, repos, revisionSources, wikiChunks } from "@/db/schema";
+import { chunks, pages, repos, revisionSources, wikiChunks } from "@/db/schema";
 import { repoFullNameSchema, type RepoRef } from "@/github/repo-name";
 import { createOpenRouterEmbedder, toVector, type Embedder } from "@/ingest/embedder";
 import { env, openRouterKey } from "@/lib/env";
@@ -19,6 +19,7 @@ const EQUAL_WEIGHTS: FusionWeights = { vector: 1, fts: 1 };
 
 // Inputs can come straight from the model's tool call, so validate even typed callers.
 const inputSchema = z.object({
+  wikiId: z.uuid(),
   query: z.string().trim().min(1).max(2000),
   scope: z.enum(["source", "wiki", "all"]),
   repo: repoFullNameSchema.optional(),
@@ -48,7 +49,7 @@ export async function searchWithMode(
 ): Promise<SearchHit[]> {
   const parsed = inputSchema.parse(input);
   const { rows } = await rank(parsed, parsed.limit, mode, deps, weights);
-  return hydrate(deps.db, rows);
+  return hydrate(deps.db, parsed.wikiId, rows);
 }
 
 /** One fused row, with where it sat in each list: what the /explain view draws. */
@@ -69,13 +70,13 @@ export type RankedRow = {
  * cap: the explainer asks for every candidate so it can show both lists in full.
  */
 export async function rank(
-  input: { query: string; scope: SearchInput["scope"]; repo?: RepoRef },
+  input: { wikiId: string; query: string; scope: SearchInput["scope"]; repo?: RepoRef },
   limit: number,
   mode: SearchMode,
   deps: SearchDeps,
   weights: FusionWeights = EQUAL_WEIGHTS,
 ): Promise<{ rows: RankedRow[]; vector: number[] | null }> {
-  const { query, scope, repo } = input;
+  const { wikiId, query, scope, repo } = input;
   const { db, embedder } = deps;
 
   let repoId: string | null = null;
@@ -83,7 +84,9 @@ export async function rank(
     const [row] = await db
       .select({ id: repos.id })
       .from(repos)
-      .where(and(sql`lower(${repos.owner}) = lower(${repo.owner})`, sql`lower(${repos.name}) = lower(${repo.name})`));
+      .where(
+        and(eq(repos.wikiId, wikiId), sql`lower(${repos.owner}) = lower(${repo.owner})`, sql`lower(${repos.name}) = lower(${repo.name})`),
+      );
     if (!row) return { rows: [], vector: null };
     repoId = row.id;
   }
@@ -100,7 +103,7 @@ export async function rank(
       fts_rank: number | null;
       vec_d: number | null;
       fts_d: number | null;
-    }>(fusedQuery({ query, vector, model: embedder.model, scope, repoId, limit, mode, weights }));
+    }>(fusedQuery({ wikiId, query, vector, model: embedder.model, scope, repoId, limit, mode, weights }));
   });
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
   const rows = ranked.map((r) => {
@@ -119,6 +122,7 @@ export async function rank(
 }
 
 type QueryParts = {
+  wikiId: string;
   query: string;
   vector: number[] | null;
   model: string;
@@ -132,11 +136,16 @@ type QueryParts = {
 function fusedQuery(p: QueryParts): SQL {
   const wantSource = p.scope !== "wiki";
   const wantWiki = p.scope !== "source";
-  const srcRepo = p.repoId ? sql`and c.repo_id = ${p.repoId}::uuid` : sql``;
-  // The wiki is shared across repos: a repo filter keeps pages whose revision cites that repo.
-  const wikiRepo = p.repoId
-    ? sql`and exists (select 1 from ${revisionSources} rs where rs.revision_id = w.revision_id and rs.repo_id = ${p.repoId}::uuid)`
-    : sql``;
+  // The wiki boundary first: every list sees only this wiki's repos and pages.
+  const srcRepo = p.repoId
+    ? sql`and c.repo_id = ${p.repoId}::uuid`
+    : sql`and c.repo_id in (select id from ${repos} where wiki_id = ${p.wikiId}::uuid)`;
+  // Pages are shared across a wiki's repos: a repo filter keeps pages whose revision cites that repo.
+  const wikiRepo = sql`and w.page_id in (select id from ${pages} where wiki_id = ${p.wikiId}::uuid) ${
+    p.repoId
+      ? sql`and exists (select 1 from ${revisionSources} rs where rs.revision_id = w.revision_id and rs.repo_id = ${p.repoId}::uuid)`
+      : sql``
+  }`;
   const none = sql`select null::text as kind, null::uuid as id, null::float8 as d where false`;
 
   const vecParts: SQL[] = [];
@@ -203,13 +212,13 @@ export function tsQuery(query: string): SQL {
 
 type RankedRef = { kind: "source" | "wiki"; id: string; score: number };
 
-async function hydrate(db: Db, ranked: RankedRef[]): Promise<SearchHit[]> {
-  const byKey = await hydrateByKey(db, ranked);
+async function hydrate(db: Db, wikiId: string, ranked: RankedRef[]): Promise<SearchHit[]> {
+  const byKey = await hydrateByKey(db, wikiId, ranked);
   return ranked.flatMap((r) => byKey.get(`${r.kind}:${r.id}`) ?? []);
 }
 
-/** Hits keyed `kind:id`: wiki hits carry their page, not the chunk, so callers that link lists need this. */
-export async function hydrateByKey(db: Db, ranked: RankedRef[]): Promise<Map<string, SearchHit>> {
+/** Hits keyed `kind:id`, only from `wikiId`: keys can arrive from the client (/explain). */
+export async function hydrateByKey(db: Db, wikiId: string, ranked: RankedRef[]): Promise<Map<string, SearchHit>> {
   const srcIds = ranked.filter((r) => r.kind === "source").map((r) => r.id);
   const wikiIds = ranked.filter((r) => r.kind === "wiki").map((r) => r.id);
 
@@ -229,13 +238,14 @@ export async function hydrateByKey(db: Db, ranked: RankedRef[]): Promise<Map<str
           })
           .from(chunks)
           .innerJoin(repos, eq(repos.id, chunks.repoId))
-          .where(inArray(chunks.id, srcIds))
+          .where(and(inArray(chunks.id, srcIds), eq(repos.wikiId, wikiId)))
       : [],
     wikiIds.length
       ? db
           .select({ id: wikiChunks.id, pageId: wikiChunks.pageId, headingPath: wikiChunks.headingPath, content: wikiChunks.content })
           .from(wikiChunks)
-          .where(inArray(wikiChunks.id, wikiIds))
+          .innerJoin(pages, eq(pages.id, wikiChunks.pageId))
+          .where(and(inArray(wikiChunks.id, wikiIds), eq(pages.wikiId, wikiId)))
       : [],
   ]);
   const paths = await pagePaths(db, [...new Set(wikiRows.map((w) => w.pageId))]);

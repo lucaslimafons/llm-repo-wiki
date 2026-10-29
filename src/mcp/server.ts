@@ -1,3 +1,4 @@
+import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { db } from "@/db/client";
@@ -7,6 +8,7 @@ import { syncRepoNow } from "@/ingest/repos";
 import { getBoss } from "@/jobs/queue";
 import { searchKnowledge } from "@/search";
 import { wikiStore } from "@/wiki/store";
+import { resolveWiki } from "@/wikis/wikis";
 import {
   listPagesTool,
   readPageInputSchema,
@@ -23,16 +25,25 @@ import { SERVER_INSTRUCTIONS } from "./instructions";
 // 🔴 stdout carries the protocol: one stray console.log from any module corrupts the stream.
 console.log = console.info = console.debug = console.error;
 
+// One server per wiki: `pnpm mcp --wiki <slug>`, optional while only one wiki exists.
+const { values: args } = parseArgs({ options: { wiki: { type: "string" } }, strict: false });
+const wiki = await resolveWiki(db(), typeof args.wiki === "string" ? args.wiki : undefined).catch(async (err: Error) => {
+  console.error(`[mcp] ${err.message}`);
+  await db().$client.end({ timeout: 2 }).catch(() => {});
+  process.exit(1);
+});
+
 let queueStarted = false;
 const profile = env().MCP_PROFILE;
 const deps: McpDeps = {
   profile,
   db: db(),
-  store: wikiStore,
-  search: searchKnowledge,
+  wikiId: wiki.id,
+  store: wikiStore(wiki.id),
+  search: (input) => searchKnowledge({ ...input, wikiId: wiki.id }),
   syncRepo: (id) => {
     queueStarted = true;
-    return syncRepoNow(prodRepoDeps(), id);
+    return syncRepoNow(prodRepoDeps(), wiki.id, id);
   },
 };
 
@@ -47,7 +58,7 @@ async function run(fn: () => Promise<string>) {
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 
 function createServer() {
-  const server = new McpServer({ name: "llm-repo-wiki", version: "0.1.0" }, { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: "llm-repo-wiki", version: "0.1.0" }, { capabilities: { tools: {} }, instructions: `${SERVER_INSTRUCTIONS}\n\nThis server answers from one wiki, "${wiki.name}", and only its repositories.` });
   server.registerTool(
     "search_knowledge",
     {

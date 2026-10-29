@@ -1,13 +1,15 @@
 /**
  * Talks to `pnpm mcp` over real stdio, as Claude Code would: lists the tools, then calls the
- * read-only ones. `pnpm mcp:smoke "a question"` checks a setup before registering the server.
+ * read-only ones. `pnpm mcp:smoke "a question" [--wiki <slug>]` checks a setup before registering the server.
  */
+import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
-const query = process.argv[2] ?? "how are repositories synced";
+const { values, positionals } = parseArgs({ options: { wiki: { type: "string" } }, allowPositionals: true });
+const query = positionals[0] ?? "how are repositories synced";
 const client = new Client({ name: "mcp-smoke", version: "0.1.0" });
-await client.connect(new StdioClientTransport({ command: "pnpm", args: ["--silent", "mcp"], cwd: process.cwd(), stderr: "inherit" }));
+await client.connect(new StdioClientTransport({ command: "pnpm", args: ["--silent", "mcp", ...(values.wiki ? ["--wiki", values.wiki] : [])], cwd: process.cwd(), stderr: "inherit" }));
 
 const { tools } = await client.listTools();
 console.log(`tools: ${tools.map((t) => t.name).join(", ")}`);

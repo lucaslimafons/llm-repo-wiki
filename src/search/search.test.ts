@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { chunks, pageRevisions, pages, repos, revisionSources } from "@/db/schema";
 import { indexPage } from "@/ingest/index-page";
 import { fakeEmbedder } from "@/ingest/test-helpers";
-import { resetDb, testDb } from "@/test/db";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
 import { searchKnowledge, searchWithMode } from ".";
 
 const db = testDb();
 const DIMS = 1536;
 const QUERY = "token refresh";
+let wikiId: string;
 
 /** Unit vector mixing two axes, so cosine distances to e0 are controlled exactly. */
 function axis(a: number, weight = 0, b = 1): number[] {
@@ -20,7 +21,7 @@ function axis(a: number, weight = 0, b = 1): number[] {
 }
 
 async function repo(owner: string, name: string) {
-  const [r] = await db.insert(repos).values({ owner, name }).returning({ id: repos.id });
+  const [r] = await db.insert(repos).values({ wikiId, owner, name }).returning({ id: repos.id });
   return r.id;
 }
 
@@ -45,7 +46,10 @@ async function chunk(repoId: string, path: string, content: string, embedding: n
 }
 
 describe("searchKnowledge", () => {
-  beforeEach(resetDb);
+  beforeEach(async () => {
+    await resetDb();
+    wikiId = await createTestWiki();
+  });
   const embedder = fakeEmbedder({ [QUERY]: axis(0) });
 
   it("RRF: a chunk ranked well by both retrievers beats one ranked first by only one", async () => {
@@ -57,12 +61,12 @@ describe("searchKnowledge", () => {
     // Far vector, no full-text match.
     await chunk(r, "docs/notes.ts", "// unrelated", axis(2));
 
-    const vectorHits = await searchWithMode({ query: QUERY, scope: "source" }, "vector", { db, embedder });
+    const vectorHits = await searchWithMode({ wikiId, query: QUERY, scope: "source" }, "vector", { db, embedder });
     expect(vectorHits[0]).toMatchObject({ chunkId: vectorOnly });
-    const ftsHits = await searchWithMode({ query: QUERY, scope: "source" }, "fts", { db, embedder });
+    const ftsHits = await searchWithMode({ wikiId, query: QUERY, scope: "source" }, "fts", { db, embedder });
     expect(ftsHits.map((h) => h.kind === "source" && h.chunkId)).toEqual([both]);
 
-    const hits = await searchKnowledge({ query: QUERY, scope: "source" }, { db, embedder });
+    const hits = await searchKnowledge({ wikiId, query: QUERY, scope: "source" }, { db, embedder });
     expect(hits.map((h) => h.kind === "source" && h.chunkId).slice(0, 2)).toEqual([both, vectorOnly]);
     expect(hits[0].score).toBeCloseTo(1 / 62 + 1 / 61, 10);
     expect(hits[1].score).toBeCloseTo(1 / 61, 10);
@@ -74,10 +78,10 @@ describe("searchKnowledge", () => {
     const one = await chunk(r, "src/a.ts", "the token is stored", axis(3));
     const two = await chunk(r, "src/b.ts", "refresh the token before expiry", axis(4));
     await chunk(r, "src/c.ts", "how do we do it", axis(5));
-    const hits = await searchWithMode({ query: "How do I refresh a token?", scope: "source" }, "fts", { db, embedder });
+    const hits = await searchWithMode({ wikiId, query: "How do I refresh a token?", scope: "source" }, "fts", { db, embedder });
     expect(hits.map((h) => h.kind === "source" && h.chunkId)).toEqual([two, one]);
     // websearch syntax still works: an excluded term removes the chunk.
-    const excluded = await searchWithMode({ query: "token -expiry", scope: "source" }, "fts", { db, embedder });
+    const excluded = await searchWithMode({ wikiId, query: "token -expiry", scope: "source" }, "fts", { db, embedder });
     expect(excluded.map((h) => h.kind === "source" && h.chunkId)).toEqual([one]);
   });
 
@@ -87,22 +91,22 @@ describe("searchKnowledge", () => {
     await chunk(a, "src/a.ts", "token refresh in auth", axis(0));
     const inB = await chunk(b, "src/b.ts", "token refresh in billing", axis(0, 0.1));
 
-    const hits = await searchKnowledge({ query: QUERY, scope: "source", repo: "ACME/billing" }, { db, embedder });
+    const hits = await searchKnowledge({ wikiId, query: QUERY, scope: "source", repo: "ACME/billing" }, { db, embedder });
     expect(hits.map((h) => h.kind === "source" && h.chunkId)).toEqual([inB]);
-    expect(await searchKnowledge({ query: QUERY, scope: "source", repo: "acme/nope" }, { db, embedder })).toEqual([]);
+    expect(await searchKnowledge({ wikiId, query: QUERY, scope: "source", repo: "acme/nope" }, { db, embedder })).toEqual([]);
   });
 
   it("respects the limit and validates input", async () => {
     const r = await repo("acme", "auth");
     for (let i = 0; i < 5; i++) await chunk(r, `src/f${i}.ts`, `token refresh ${i}`, axis(0, i / 10));
-    expect(await searchKnowledge({ query: QUERY, scope: "source", limit: 3 }, { db, embedder })).toHaveLength(3);
-    await expect(searchKnowledge({ query: " ", scope: "source" }, { db, embedder })).rejects.toThrow();
-    await expect(searchKnowledge({ query: QUERY, scope: "source", repo: "../x" }, { db, embedder })).rejects.toThrow();
+    expect(await searchKnowledge({ wikiId, query: QUERY, scope: "source", limit: 3 }, { db, embedder })).toHaveLength(3);
+    await expect(searchKnowledge({ wikiId, query: " ", scope: "source" }, { db, embedder })).rejects.toThrow();
+    await expect(searchKnowledge({ wikiId, query: QUERY, scope: "source", repo: "../x" }, { db, embedder })).rejects.toThrow();
   });
 
   describe("wiki scope", () => {
     async function page(title: string, parentId: string | null, body: string, citesRepo?: string) {
-      const [p] = await db.insert(pages).values({ title, parentId }).returning({ id: pages.id });
+      const [p] = await db.insert(pages).values({ wikiId, title, parentId }).returning({ id: pages.id });
       const [rev] = await db
         .insert(pageRevisions)
         .values({ pageId: p.id, title, bodyMd: body, authorKind: "human", status: "accepted" })
@@ -122,15 +126,15 @@ describe("searchKnowledge", () => {
       expect(wikiEmbedder.texts[1].startsWith("wiki/Architecture/Auth > Auth > Token refresh\n\n")).toBe(true);
       await indexPage({ db, embedder: wikiEmbedder }, arch);
 
-      const wikiHits = await searchKnowledge({ query: QUERY, scope: "wiki" }, { db, embedder });
+      const wikiHits = await searchKnowledge({ wikiId, query: QUERY, scope: "wiki" }, { db, embedder });
       expect(wikiHits[0]).toMatchObject({ kind: "wiki", pageId: auth.pageId, pagePath: "Architecture/Auth", headingPath: "Auth > Token refresh" });
       expect(wikiHits.every((h) => h.kind === "wiki")).toBe(true);
 
-      const all = await searchKnowledge({ query: QUERY, scope: "all" }, { db, embedder });
+      const all = await searchKnowledge({ wikiId, query: QUERY, scope: "all" }, { db, embedder });
       expect(new Set(all.map((h) => h.kind))).toEqual(new Set(["source", "wiki"]));
 
       // A repo filter keeps only pages whose revision cites that repo.
-      const filtered = await searchKnowledge({ query: "overview", scope: "wiki", repo: "acme/auth" }, { db, embedder });
+      const filtered = await searchKnowledge({ wikiId, query: "overview", scope: "wiki", repo: "acme/auth" }, { db, embedder });
       expect(filtered.every((h) => h.kind === "wiki" && h.pageId === auth.pageId)).toBe(true);
     });
 
@@ -156,7 +160,7 @@ describe("searchKnowledge", () => {
       const e = fakeEmbedder();
       await indexPage({ db, embedder: e }, p);
       await indexPage({ db, embedder: e }, p);
-      const hits = await searchKnowledge({ query: "Solo", scope: "wiki" }, { db, embedder });
+      const hits = await searchKnowledge({ wikiId, query: "Solo", scope: "wiki" }, { db, embedder });
       expect(hits).toHaveLength(2);
     });
   });

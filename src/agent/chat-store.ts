@@ -26,23 +26,24 @@ function toSummary(row: typeof chats.$inferSelect): ChatSummary {
   };
 }
 
-export async function createChat(db: Db): Promise<ChatSummary> {
-  const [row] = await db.insert(chats).values({}).returning();
+export async function createChat(db: Db, wikiId: string): Promise<ChatSummary> {
+  const [row] = await db.insert(chats).values({ wikiId }).returning();
   return toSummary(row);
 }
 
-export async function listChats(db: Db, limit = 100): Promise<ChatSummary[]> {
-  const rows = await db.select().from(chats).orderBy(desc(chats.updatedAt)).limit(limit);
+export async function listChats(db: Db, wikiId: string, limit = 100): Promise<ChatSummary[]> {
+  const rows = await db.select().from(chats).where(eq(chats.wikiId, wikiId)).orderBy(desc(chats.updatedAt)).limit(limit);
   return rows.map(toSummary);
 }
 
-export async function getChat(db: Db, id: string) {
-  const [row] = await db.select().from(chats).where(eq(chats.id, id));
+/** Ids arrive from the client: a chat of another wiki reads as not found. */
+export async function getChat(db: Db, wikiId: string, id: string) {
+  const [row] = await db.select().from(chats).where(and(eq(chats.id, id), eq(chats.wikiId, wikiId)));
   return row ?? null;
 }
 
-export async function deleteChat(db: Db, id: string): Promise<boolean> {
-  const rows = await db.delete(chats).where(eq(chats.id, id)).returning({ id: chats.id });
+export async function deleteChat(db: Db, wikiId: string, id: string): Promise<boolean> {
+  const rows = await db.delete(chats).where(and(eq(chats.id, id), eq(chats.wikiId, wikiId))).returning({ id: chats.id });
   return rows.length > 0;
 }
 

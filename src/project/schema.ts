@@ -4,17 +4,19 @@ import { z } from "zod";
 export const MAX_CONTEXT_CHARS = 4_000;
 export const MAX_ROLE_CHARS = 200;
 
-/** How a multi-repo wiki is laid out; the owner picks it on the Project context page. */
+/** How a multi-repo wiki is laid out; the owner picks it on the wiki's settings page. */
 export const WIKI_LAYOUTS = ["topic", "repo"] as const;
 export type WikiLayout = (typeof WIKI_LAYOUTS)[number];
 
 export type ProjectContext = {
+  name: string;
   context: string;
   layout: WikiLayout;
   repos: { id: string; fullName: string; role: string | null }[];
 };
 
 export const projectContextInputSchema = z.object({
+  name: z.string().trim().min(1, "Give the wiki a name").max(60),
   context: z.string().trim().max(MAX_CONTEXT_CHARS),
   layout: z.enum(WIKI_LAYOUTS),
   roles: z.array(z.object({ repoId: z.uuid(), role: z.string().trim().max(MAX_ROLE_CHARS) })).max(100),
