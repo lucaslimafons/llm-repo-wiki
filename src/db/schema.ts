@@ -10,7 +10,6 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
-  smallint,
   text,
   timestamp,
   unique,
@@ -26,6 +25,33 @@ const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
+// ── Wikis: isolated projects. Every repo, page and chat belongs to exactly one ──
+
+export const wikis = pgTable(
+  "wikis",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** URL segment: /w/<slug>/… */
+    slug: text("slug").notNull().unique(),
+    name: text("name").notNull(),
+    /** The owner's brief about the project the repos make up, read by the author and chat agents. */
+    context: text("context").notNull().default(""),
+    /** "topic": one shared tree. "repo": a top-level folder per repo. See WIKI_SCHEMA.md. */
+    layout: text("layout").notNull().default("topic"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("wikis_layout", sql`${t.layout} in ('topic', 'repo')`),
+    check("wikis_slug_format", sql`${t.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
+  ],
+);
+
+const wikiId = () =>
+  uuid("wiki_id")
+    .notNull()
+    .references(() => wikis.id, { onDelete: "cascade" });
+
 // ── Raw layer: repos and their chunks (immutable per commit) ────────────────
 
 export const repoStatus = pgEnum("repo_status", ["idle", "queued", "syncing", "error"]);
@@ -34,6 +60,8 @@ export const repos = pgTable(
   "repos",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** One wiki per repo: the same repo in two wikis would be indexed and paid for twice. */
+    wikiId: wikiId(),
     owner: text("owner").notNull(),
     name: text("name").notNull(),
     defaultBranch: text("default_branch"),
@@ -49,7 +77,7 @@ export const repos = pgTable(
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [unique().on(t.owner, t.name)],
+  (t) => [unique().on(t.owner, t.name), index().on(t.wikiId)],
 );
 
 export const sourceFiles = pgTable(
@@ -111,6 +139,7 @@ export const pages = pgTable(
   "pages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    wikiId: wikiId(),
     parentId: uuid("parent_id").references((): AnyPgColumn => pages.id, { onDelete: "restrict" }),
     /** Display title. Slugged to a filename only on export. */
     title: text("title").notNull(),
@@ -123,7 +152,7 @@ export const pages = pgTable(
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique().on(t.parentId, t.title).nullsNotDistinct(), index().on(t.parentId)],
+  (t) => [unique().on(t.wikiId, t.parentId, t.title).nullsNotDistinct(), index().on(t.parentId)],
 );
 
 export const authorKind = pgEnum("author_kind", ["agent", "human"]);
@@ -201,6 +230,7 @@ export const agentRunKind = pgEnum("agent_run_kind", ["chat", "author", "lint"])
 
 export const agentRuns = pgTable("agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
+  wikiId: wikiId(),
   kind: agentRunKind("kind").notNull(),
   model: text("model").notNull(),
   status: text("status").notNull().default("running"),
@@ -218,6 +248,7 @@ export const wikiLog = pgTable(
   "wiki_log",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    wikiId: wikiId(),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
     actor: authorKind("actor").notNull(),
     action: text("action").notNull(),
@@ -225,7 +256,7 @@ export const wikiLog = pgTable(
     repoId: uuid("repo_id").references(() => repos.id, { onDelete: "set null" }),
     details: jsonb("details").$type<Record<string, unknown>>(),
   },
-  (t) => [index().on(t.at)],
+  (t) => [index().on(t.wikiId, t.at)],
 );
 
 /** A chat session. Reopening one reloads its full history server-side into the agent. */
@@ -233,6 +264,7 @@ export const chats = pgTable(
   "chats",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    wikiId: wikiId(),
     title: text("title"),
     /** Rolling summary of messages older than the context window keeps verbatim. */
     summary: text("summary"),
@@ -241,7 +273,7 @@ export const chats = pgTable(
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.updatedAt)],
+  (t) => [index().on(t.wikiId, t.updatedAt)],
 );
 
 /** One AI SDK UIMessage per row, stored whole (tool calls and source parts included) and re-validated on load. */
@@ -264,19 +296,3 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   event: text("event").notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
 });
-
-/** One row: the owner's brief about the project the repos make up, read by the author and chat agents. */
-export const projectSettings = pgTable(
-  "project_settings",
-  {
-    id: smallint("id").primaryKey().default(1),
-    context: text("context").notNull().default(""),
-    /** "topic": one shared tree. "repo": a top-level folder per repo. See WIKI_SCHEMA.md. */
-    layout: text("layout").notNull().default("topic"),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    check("project_settings_single_row", sql`${t.id} = 1`),
-    check("project_settings_layout", sql`${t.layout} in ('topic', 'repo')`),
-  ],
-);
