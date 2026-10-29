@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { runAuthorJob } from "@/agent/author";
 import { db } from "@/db/client";
-import { repos } from "@/db/schema";
+import { pages, repos } from "@/db/schema";
 import { parseRepoFullName } from "@/github/repo-name";
 import { getBoss } from "@/jobs/queue";
 import { openRouterKey } from "@/lib/env";
@@ -12,22 +12,29 @@ import { wikiStore } from "@/wiki/store";
 
 /**
  * `pnpm bench:author <model> <owner/name> --wipe`: writes a whole wiki for one synced repo with one
- * author model and prints pages, grounding, tokens, cost and time. 🔴 Deletes every wiki page first.
+ * author model and prints pages, grounding, tokens, cost and time. 🔴 Deletes every page of the repo's wiki first.
  */
 const [model, repoName] = process.argv.slice(2);
 if (!model || !repoName || !process.argv.includes("--wipe")) {
-  console.error("usage: pnpm bench:author <openrouter model> <owner/name> --wipe   (deletes every wiki page first)");
+  console.error("usage: pnpm bench:author <openrouter model> <owner/name> --wipe   (deletes every page of that repo's wiki first)");
   process.exit(1);
 }
 const ref = parseRepoFullName(repoName);
 const [repo] = await db().select().from(repos).where(and(eq(repos.owner, ref.owner), eq(repos.name, ref.name)));
 if (!repo?.syncedSha) throw new Error(`${repoName} is not added and synced yet`);
 
-await db().execute(sql`delete from pages`);
+// Detach first: pages.parent_id is ON DELETE RESTRICT.
+await db().update(pages).set({ parentId: null }).where(eq(pages.wikiId, repo.wikiId));
+await db().delete(pages).where(eq(pages.wikiId, repo.wikiId));
 const t0 = Date.now();
 try {
   const result = await runAuthorJob(
-    { db: db(), store: wikiStore, search: searchKnowledge, model: createOpenRouter({ apiKey: openRouterKey() })(model, { usage: { include: true }, ...providerPrivacy() }) },
+    {
+      db: db(),
+      storeFor: wikiStore,
+      searchFor: (wikiId) => (input) => searchKnowledge({ ...input, wikiId }),
+      model: createOpenRouter({ apiKey: openRouterKey() })(model, { usage: { include: true }, ...providerPrivacy() }),
+    },
     { repoId: repo.id, fromSha: null, toSha: repo.syncedSha, changedPaths: [] },
   );
   const [stats] = await db().execute<{ cost: string; input: number; output: number; cited: number; ungrounded: number }>(sql`

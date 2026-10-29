@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { parseArgs } from "node:util";
 import { isStepCount, ToolLoopAgent } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { z } from "zod";
@@ -13,6 +14,7 @@ import { providerPrivacy } from "@/lib/openrouter-privacy";
 import { parseSourceHref } from "@/lib/source-links";
 import { searchKnowledge } from "@/search";
 import { wikiStore } from "@/wiki/store";
+import { resolveWiki } from "@/wikis/wikis";
 
 /**
  * `pnpm bench:chat <model> [more models…]`: the real chat agent (tools, prompt, step cap) on the
@@ -22,12 +24,14 @@ const QUESTIONS = Number(process.env.BENCH_QUESTIONS ?? 6);
 const golden = z
   .object({ questions: z.array(z.object({ q: z.string(), expected: z.array(z.string()) })) })
   .parse(JSON.parse(await readFile(new URL("../eval/golden.json", import.meta.url), "utf8")));
-const models = process.argv.slice(2);
-if (models.length === 0) throw new Error("usage: pnpm bench:chat <openrouter model> [...]");
+const { values, positionals: models } = parseArgs({ options: { wiki: { type: "string" } }, allowPositionals: true });
+if (models.length === 0) throw new Error("usage: pnpm bench:chat <openrouter model> [...] [--wiki <slug>]");
+const wiki = await resolveWiki(db(), values.wiki);
+const store = wikiStore(wiki.id);
 
 const openrouter = createOpenRouter({ apiKey: openRouterKey() });
-const instructions = buildChatInstructions({ schema: await loadWikiSchema(), tree: await wikiStore.listTree(), summary: null });
-const tools = createWikiTools({ store: wikiStore, search: searchKnowledge, author: { kind: "human" }, mode: "apply" });
+const instructions = buildChatInstructions({ schema: await loadWikiSchema(), tree: await store.listTree(), summary: null });
+const tools = createWikiTools({ store, wikiSlug: wiki.slug, search: (input) => searchKnowledge({ ...input, wikiId: wiki.id }), author: { kind: "human" }, mode: "apply" });
 
 for (const model of models) {
   const agent = new ToolLoopAgent({

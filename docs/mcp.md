@@ -1,7 +1,7 @@
 # Use it from Claude Code (MCP)
 
 `pnpm mcp` starts a local [MCP](https://modelcontextprotocol.io) server over stdio, with no network
-listener. Claude Code, or any MCP client, can then search every indexed repo, read the wiki and see
+listener. Claude Code, or any MCP client, can then search one wiki's repos, read its pages and see
 how fresh the index is, instead of grepping several repos.
 
 ## Set up
@@ -9,10 +9,15 @@ how fresh the index is, instead of grepping several repos.
 Register it once, at user scope, so it works in every repo you open:
 
 ```bash
-claude mcp add --transport stdio -s user llm-repo-wiki -- pnpm --silent --dir /path/to/llm-repo-wiki mcp
+claude mcp add --transport stdio -s user llm-repo-wiki -- pnpm --silent --dir /path/to/llm-repo-wiki mcp --wiki <slug>
 claude mcp list                                  # llm-repo-wiki should show ✓ connected
-pnpm mcp:smoke "how are repositories synced"     # optional: call it the way Claude Code will
+pnpm mcp:smoke "how are repositories synced" --wiki <slug>   # optional: call it the way Claude Code will
 ```
+
+One server answers from one wiki. `--wiki` is optional while only one wiki exists; with several,
+the server refuses to start without it and lists them. For two projects, register two servers under
+different names (e.g. `wiki-shop` and `wiki-blog`), each with its own `--wiki`. In a project's
+`.mcp.json`, register only that project's wiki.
 
 It needs the Postgres container running. Keep `pnpm worker` running too, so the index follows your
 default branches. Tools load when a Claude Code session starts: open a new session after adding it,

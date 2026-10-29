@@ -14,6 +14,8 @@ import { z } from "zod";
 const configSchema = z.object({
   workdir: z.string().min(1),
   addDirs: z.array(z.string().min(1)).default([]),
+  /** The wiki the MCP arms answer from; needed once more than one wiki exists. */
+  wiki: z.string().optional(),
   runs: z.number().int().min(1).max(10).default(3),
   model: z.string().optional(),
   questions: z.array(z.object({ id: z.string(), question: z.string(), expect: z.array(z.string().regex(/^[^:]+:.+$/, "repo:path")) })).min(1),
@@ -27,7 +29,7 @@ const ARM_ENV: Record<Exclude<Arm, "grep">, Record<string, string>> = { mcp: { M
 /** Pre-registered bar (issue #13): ship it as the recommended setup only if this holds. */
 const BAR = { maxTokenRatio: 0.7, maxRecallDrop: 0.05 };
 // Read, Grep and Glob are NOT listed: an explicit allow grants them everywhere, and a run then
-// wanders into sibling clones. Left to the default, they work only inside workdir + addDirs.
+// wanders into sibling clones. Even at the default, -p can read paths outside them: keep workdir clean.
 const MCP_TOOLS = ["search_knowledge", "read_page", "list_pages", "repo_status"].map((t) => `mcp__llm-repo-wiki__${t}`);
 // Edits, shell, web and subagents would make the arms incomparable; sync_repo stays out of a measurement.
 const DENIED = ["Edit", "Write", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Agent", "Task", "mcp__llm-repo-wiki__sync_repo"];
@@ -70,7 +72,7 @@ async function main() {
     const servers =
       arm === "grep"
         ? {}
-        : { "llm-repo-wiki": { type: "stdio", command: "pnpm", args: ["--silent", "--dir", repoRoot, "mcp"], env: ARM_ENV[arm] } };
+        : { "llm-repo-wiki": { type: "stdio", command: "pnpm", args: ["--silent", "--dir", repoRoot, "mcp", ...(config.wiki ? ["--wiki", config.wiki] : [])], env: ARM_ENV[arm] } };
     await writeFile(mcpConfigs[arm], JSON.stringify({ mcpServers: servers }));
   }
 

@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { SearchHit } from "@/core/contracts";
 import { repos } from "@/db/schema";
-import { resetDb, testDb } from "@/test/db";
-import { createWikiStore } from "@/wiki/store";
+import { createTestWiki, resetDb, testDb } from "@/test/db";
+import { createWikiStore, type WikiStoreExt } from "@/wiki/store";
 import {
   readPageInputSchema,
   readPageTool,
@@ -19,7 +19,8 @@ import { SERVER_INSTRUCTIONS } from "./instructions";
 const db = testDb();
 const SHA = "a".repeat(40);
 const NEWER = "b".repeat(40);
-const store = createWikiStore(db, { enqueueIndexPage: async () => {} });
+let wikiId: string;
+let store: WikiStoreExt;
 
 function hit(over: Partial<Extract<SearchHit, { kind: "source" }>> = {}): SearchHit {
   return {
@@ -40,6 +41,7 @@ function hit(over: Partial<Extract<SearchHit, { kind: "source" }>> = {}): Search
 function deps(hits: SearchHit[] = [hit()], synced: string[] = []): McpDeps {
   return {
     db,
+    wikiId,
     store,
     search: async () => hits,
     syncRepo: async (id) => (synced.push(id), { ok: true, data: undefined }),
@@ -60,7 +62,9 @@ async function proposeQuotaPage() {
 
 beforeEach(async () => {
   await resetDb();
-  await db.insert(repos).values({ owner: "acme", name: "api", defaultBranch: "main", syncedSha: SHA, desiredSha: SHA, status: "idle" });
+  wikiId = await createTestWiki();
+  store = createWikiStore(db, { wikiId, enqueueIndexPage: async () => {} });
+  await db.insert(repos).values({ wikiId, owner: "acme", name: "api", defaultBranch: "main", syncedSha: SHA, desiredSha: SHA, status: "idle" });
 });
 
 describe("search_knowledge", () => {

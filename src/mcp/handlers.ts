@@ -1,6 +1,6 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { Citation, SearchHit, SearchInput } from "@/core/contracts";
+import type { Citation, ScopedSearch, SearchHit } from "@/core/contracts";
 import type { Db } from "@/db/client";
 import { pageRevisions, pages, repos, revisionSources } from "@/db/schema";
 import { repoFullNameSchema } from "@/github/repo-name";
@@ -14,8 +14,10 @@ import type { WikiStoreExt } from "@/wiki/store";
 /** What the MCP tools need; injected so tests run on the real test DB with a fake embedder. */
 export type McpDeps = {
   db: Db;
+  /** The one wiki this server answers from; store and search are bound to it too. */
+  wikiId: string;
   store: Pick<WikiStoreExt, "getPage" | "listTree" | "listProposals" | "pagePaths">;
-  search: (input: SearchInput) => Promise<SearchHit[]>;
+  search: ScopedSearch;
   syncRepo: (repoId: string) => Promise<ActionResult>;
   profile?: SearchProfile;
 };
@@ -62,7 +64,7 @@ export async function searchTool(deps: McpDeps, input: z.output<typeof searchInp
   if (hits.length === 0) return `No results for "${query}". Try other words, scope "all", or grep the repo directly.`;
 
   const sources = hits.filter((h): h is Extract<SearchHit, { kind: "source" }> => h.kind === "source");
-  const [citing, fresh] = await Promise.all([citingPages(deps, sources), freshness(deps.db, [...new Set(sources.map((h) => h.repo))])]);
+  const [citing, fresh] = await Promise.all([citingPages(deps, sources), freshness(deps.db, deps.wikiId, [...new Set(sources.map((h) => h.repo))])]);
 
   const blocks = hits.map((h, i) => {
     if (h.kind === "wiki") {
@@ -116,9 +118,9 @@ export async function listPagesTool(deps: McpDeps): Promise<string> {
 
 export async function repoStatusTool(deps: McpDeps): Promise<string> {
   const [list, polled, { pipelines }] = await Promise.all([
-    listRepos(deps.db),
-    deps.db.select({ id: repos.id, lastPolledAt: repos.lastPolledAt }).from(repos),
-    getRepoPipelines(deps.db),
+    listRepos(deps.db, deps.wikiId),
+    deps.db.select({ id: repos.id, lastPolledAt: repos.lastPolledAt }).from(repos).where(eq(repos.wikiId, deps.wikiId)),
+    getRepoPipelines(deps.db, deps.wikiId),
   ]);
   if (list.length === 0) return "No repositories are indexed yet.";
   const polledAt = new Map(polled.map((r) => [r.id, r.lastPolledAt]));
@@ -142,8 +144,10 @@ export async function syncRepoTool(deps: McpDeps, input: z.output<typeof syncRep
   const [row] = await deps.db
     .select({ id: repos.id, owner: repos.owner, name: repos.name })
     .from(repos)
-    .where(and(sql`lower(${repos.owner}) = lower(${repo.owner})`, sql`lower(${repos.name}) = lower(${repo.name})`));
-  if (!row) return `${repo.owner}/${repo.name} is not indexed. Add it in the wiki app first.`;
+    .where(
+      and(eq(repos.wikiId, deps.wikiId), sql`lower(${repos.owner}) = lower(${repo.owner})`, sql`lower(${repos.name}) = lower(${repo.name})`),
+    );
+  if (!row) return `${repo.owner}/${repo.name} is not indexed in this wiki. Add it in the wiki app first.`;
   const name = `${row.owner}/${row.name}`;
   const result = await deps.syncRepo(row.id);
   if (!result.ok) return `Could not queue a sync of ${name}: ${result.error}`;
@@ -158,9 +162,9 @@ function freshLine(synced: string | null, desired: string | null, status: string
   return `indexed at ${short(synced)}, current with the latest seen head`;
 }
 
-async function freshness(db: Db, names: string[]): Promise<string[]> {
+async function freshness(db: Db, wikiId: string, names: string[]): Promise<string[]> {
   if (names.length === 0) return [];
-  const all = await listRepos(db);
+  const all = await listRepos(db, wikiId);
   return all.filter((r) => names.includes(r.fullName)).map((r) => `- ${r.fullName}: ${freshLine(r.syncedSha, r.desiredSha, r.status)}`);
 }
 
@@ -175,7 +179,13 @@ async function citingPages(deps: McpDeps, hits: { repo: string; path: string }[]
     .innerJoin(repos, eq(repos.id, revisionSources.repoId))
     .innerJoin(pageRevisions, eq(pageRevisions.id, revisionSources.revisionId))
     .innerJoin(pages, eq(pages.id, pageRevisions.pageId))
-    .where(and(inArray(revisionSources.path, paths), or(eq(pageRevisions.status, "proposed"), eq(pages.currentRevisionId, pageRevisions.id))));
+    .where(
+      and(
+        eq(pages.wikiId, deps.wikiId),
+        inArray(revisionSources.path, paths),
+        or(eq(pageRevisions.status, "proposed"), eq(pages.currentRevisionId, pageRevisions.id)),
+      ),
+    );
   const titles = await deps.store.pagePaths();
   for (const r of rows) {
     const key = `${r.owner}/${r.name}/${r.path}`;

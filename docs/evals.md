@@ -257,5 +257,5 @@ pnpm db:setup && pnpm worker            # in one terminal
 pnpm repo:add pmndrs/zustand            # wait for the sync to finish
 pnpm eval                               # retrieval strategies (eval/golden.json)
 pnpm bench:chat anthropic/claude-haiku-5.5 z-ai/glm-5.3-flash   # chat agent per model
-pnpm bench:author z-ai/glm-5.3-flash pmndrs/zustand --wipe      # deletes all wiki pages first
+pnpm bench:author z-ai/glm-5.3-flash pmndrs/zustand --wipe      # deletes that repo's wiki pages first
 ```

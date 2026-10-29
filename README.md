@@ -34,8 +34,10 @@ design, so everything binds to `127.0.0.1`.
 - **Shows its work.** `/pipeline` draws a repo's run as stages on a board, live or as a replay.
   `/explain` steps through retrieval for any question: both search lists, the fusion, and which
   citations in an answer survive grounding.
+- **Keeps projects apart.** One instance holds several wikis, one per project. Each has its own
+  repos, pages, chats and brief; search, chat and the author never cross from one to another.
 - **Answers Claude Code directly.** A local [MCP server](docs/mcp.md) gives Claude Code the same
-  search over every repo, the wiki pages, and how fresh the index is.
+  search over a wiki's repos, its pages, and how fresh the index is.
 - **Exports plain markdown.** `pnpm export` writes the accepted wiki as files that render on GitHub.
 
 ## Quick start
@@ -50,8 +52,10 @@ pnpm install
 pnpm db:setup                     # Postgres 18 + pgvector in Docker, then migrations
 pnpm dev                          # http://127.0.0.1:3000
 pnpm worker                       # second terminal: sync + author jobs
-pnpm repo:add pmndrs/zustand      # or use the "Add repository" box in the sidebar
 ```
+
+Open the app, create a wiki for your project, and add a repo with the sidebar's **Add repository**
+box (or `pnpm repo:add pmndrs/zustand --wiki <slug>`).
 
 The first sync takes seconds. The first wiki takes about 10 minutes and costs about $0.10. Review
 its pages under **Proposals**, and watch the run under **Pipeline**.
@@ -97,7 +101,7 @@ chunks) on 2026-10-22:
 ```bash
 pnpm eval
 pnpm bench:chat anthropic/claude-haiku-5.5 z-ai/glm-5.3-flash
-pnpm bench:author anthropic/claude-haiku-5.5 pmndrs/zustand --wipe   # deletes all wiki pages first
+pnpm bench:author anthropic/claude-haiku-5.5 pmndrs/zustand --wipe   # deletes that repo's wiki pages first
 ```
 
 These are small samples on one repo; a gap of one answer is within noise. Method, charts and the
