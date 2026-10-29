@@ -89,6 +89,22 @@ Notable choices: no Redis (the job queue lives in the same Postgres), no agent f
 pipeline is plain code, so every step is visible), and zod at every boundary.
 [`docs/plan.md`](docs/plan.md) has every design decision and its reasoning.
 
+### Watch a search
+
+![The "How search works" page answering "how dependency injection works?" over zustand: the full-text and vector lists, their fusion, then an answer whose three citations all survive grounding](docs/img/search.gif)
+
+*The **How search works** page on the zustand wiki: the full-text and vector lists for one question,
+how reciprocal rank fusion merges them, then one answer from the top chunks with every citation
+checked. Sped up from a 90-second recording.*
+
+### Chat with it
+
+![Reading the zustand wiki's Getting Started page while the chat answers "how to create a first store in zustand?" with code and citations to the exact lines](docs/img/chat.gif)
+
+*Reading a page while the chat answers from the same index. Every claim links to the lines it came
+from, and the agent says when the wiki itself doesn't cover something yet. Sped up from a 70-second
+recording.*
+
 ## Results
 
 Live runs on [`pmndrs/zustand`](https://github.com/pmndrs/zustand) (`382d29c`, 128 files, 702
