@@ -64,6 +64,7 @@ names. It runs on your Claude Code login; no API key is needed.
 
 ```bash
 cp eval/mcp-bench.example.json eval/mcp-bench.local.json   # edit workdir, addDirs, questions
+# or run the public question set on pmndrs/zustand: eval/mcp-bench.zustand.json (see evals.md)
 pnpm bench:mcp --runs 1          # a first look
 pnpm bench:mcp --runs 3          # enough runs to see past the noise
 pnpm bench:mcp --arms grep,mcp,mcp-compact   # compare both profiles (default: grep,mcp-compact)
