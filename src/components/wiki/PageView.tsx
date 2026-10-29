@@ -7,6 +7,7 @@ import type { PageView as Page } from "@/core/contracts";
 import type { WikiPaths } from "@/components/markdown/plugins";
 import { historyRoute, wikiRoute } from "@/wiki/routes";
 import { Disclosure } from "@/components/ui/Disclosure";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { PageEditor } from "./PageEditor";
 
 /** Server-rendered body as `children`; edit mode swaps in the client editor with a live preview. */
@@ -30,6 +31,7 @@ export function PageView({
   citations: ReactNode;
   children: ReactNode;
 }) {
+  const { slug } = useWiki();
   const [editing, setEditing] = useState(startEditing && page.revisionId !== null);
   const crumbs = page.path.split("/");
 
@@ -38,7 +40,7 @@ export function PageView({
       <nav className="mb-2 flex flex-wrap items-center gap-1 text-xs text-muted" aria-label="Breadcrumb">
         {crumbs.slice(0, -1).map((c, i) => (
           <span key={i} className="flex items-center gap-1">
-            <Link href={wikiRoute(crumbs.slice(0, i + 1).join("/"))} className="hover:text-foreground">
+            <Link href={wikiRoute(slug, crumbs.slice(0, i + 1).join("/"))} className="hover:text-foreground">
               {c}
             </Link>
             <span>/</span>
@@ -62,7 +64,7 @@ export function PageView({
                 <Pencil className="size-4" /> Edit
               </button>
               <Link
-                href={historyRoute(page.path)}
+                href={historyRoute(slug, page.path)}
                 className="inline-flex items-center gap-1 rounded-md border border-line px-2.5 py-1 text-sm hover:bg-surface-2"
               >
                 <History className="size-4" /> History

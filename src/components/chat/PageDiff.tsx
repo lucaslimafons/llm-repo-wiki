@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { queryKeys } from "@/lib/query-keys";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { chatApi } from "./api";
 
 // The diff viewer touches the DOM and is heavy: client-only and loaded on first approval card.
@@ -13,9 +14,10 @@ const DiffViewer = dynamic(() => import("react-diff-viewer-continued"), {
 
 /** Current page body (fetched) against the body the agent wants to write. */
 export function PageDiff({ path, newBody, baseRevision }: { path: string; newBody: string; baseRevision: string }) {
+  const { slug } = useWiki();
   const current = useQuery({
-    queryKey: queryKeys.chat.pageBody(path),
-    queryFn: () => chatApi.pageBody(path),
+    queryKey: queryKeys.chat.pageBody(slug, path),
+    queryFn: () => chatApi.pageBody(slug, path),
     staleTime: 0,
   });
   if (current.isPending) return <p className="p-2 text-xs text-muted">Loading current page…</p>;

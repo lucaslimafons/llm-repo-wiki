@@ -6,13 +6,15 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { PageView } from "@/core/contracts";
 import { queryKeys } from "@/lib/query-keys";
-import { savePageAction } from "@/app/(wiki)/actions";
+import { useWiki } from "@/components/wikis/WikiContext";
+import { savePageAction } from "@/app/w/[wiki]/actions";
 import { Markdown } from "@/components/markdown/Markdown";
 import type { WikiPaths } from "@/components/markdown/plugins";
 import { wikiRoute } from "@/wiki/routes";
 
 /** Textarea + live preview. Saves against the revision it opened, so a concurrent edit conflicts. */
 export function PageEditor({ page, wikiPaths, onDone }: { page: PageView; wikiPaths: WikiPaths; onDone: () => void }) {
+  const { slug } = useWiki();
   const queryClient = useQueryClient();
   const router = useRouter();
   const [title, setTitle] = useState(page.title);
@@ -21,6 +23,7 @@ export function PageEditor({ page, wikiPaths, onDone }: { page: PageView; wikiPa
   const save = useMutation({
     mutationFn: async () => {
       const res = await savePageAction({
+        wiki: slug,
         pageId: page.id,
         bodyMd: body,
         title: title === page.title ? undefined : title,
@@ -30,8 +33,8 @@ export function PageEditor({ page, wikiPaths, onDone }: { page: PageView; wikiPa
       return res.data;
     },
     onSuccess: async (saved) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all });
-      if (saved.path !== page.path) router.replace(wikiRoute(saved.path));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all(slug) });
+      if (saved.path !== page.path) router.replace(wikiRoute(slug, saved.path));
       onDone();
     },
   });
@@ -85,7 +88,7 @@ export function PageEditor({ page, wikiPaths, onDone }: { page: PageView; wikiPa
         />
         {showPreview && (
           <div className="min-h-[60vh] overflow-auto rounded-md border border-line bg-surface p-4">
-            <Markdown wikiPaths={wikiPaths}>{body}</Markdown>
+            <Markdown wikiSlug={slug} wikiPaths={wikiPaths}>{body}</Markdown>
           </div>
         )}
       </div>

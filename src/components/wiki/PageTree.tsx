@@ -22,6 +22,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import type { TreeNode } from "@/core/contracts";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
 import {
   createPageAction,
@@ -29,8 +30,8 @@ import {
   movePageAction,
   renamePageAction,
   type ActionResult,
-} from "@/app/(wiki)/actions";
-import { wikiRoute } from "@/wiki/routes";
+} from "@/app/w/[wiki]/actions";
+import { wikiBase, wikiRoute } from "@/wiki/routes";
 import { fetchTree } from "./api";
 
 type Ctx = {
@@ -43,6 +44,7 @@ type Ctx = {
   setRenaming: (id: string | null) => void;
   creatingUnder: string | null | undefined;
   setCreatingUnder: (id: string | null | undefined) => void;
+  slug: string;
   act: (fn: () => Promise<ActionResult<unknown>>, after?: (data: unknown) => void) => void;
   pending: boolean;
 };
@@ -55,17 +57,19 @@ function safeDecode(s: string) {
   }
 }
 
-/** The page path shown in the URL, for /wiki/… and /history/… alike. */
+/** The page path shown in the URL, for /w/<slug>/wiki/… and /w/<slug>/history/… alike. */
 function activePathOf(pathname: string): string | null {
-  const m = /^\/(?:wiki|history)\/(.+)$/.exec(pathname);
+  const m = /^\/w\/[^/]+\/(?:wiki|history)\/(.+)$/.exec(pathname);
   return m ? m[1].split("/").map(safeDecode).join("/") : null;
 }
 
 export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode[]; proposalCount: number }) {
+  const { slug } = useWiki();
+  const base = wikiBase(slug);
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const { data: tree } = useQuery({ queryKey: queryKeys.wiki.tree(), queryFn: fetchTree, initialData: initialTree });
+  const { data: tree } = useQuery({ queryKey: queryKeys.wiki.tree(slug), queryFn: () => fetchTree(slug), initialData: initialTree });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -78,7 +82,7 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
       if (!res.ok) throw new Error(res.error);
       return res.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.wiki.all(slug) }),
   });
 
   const ctx: Ctx = {
@@ -97,6 +101,7 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
     creatingUnder,
     setCreatingUnder,
     pending: mutation.isPending,
+    slug,
     act: (fn, after) => {
       setError(null);
       setMenuFor(null);
@@ -106,10 +111,10 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
 
   const create = (parentId: string | null, title: string) =>
     ctx.act(
-      () => createPageAction({ parentId, title }),
+      () => createPageAction({ wiki: slug, parentId, title }),
       (data) => {
         setCreatingUnder(undefined);
-        router.push(`${wikiRoute((data as { path: string }).path)}?edit=1`);
+        router.push(`${wikiRoute(slug, (data as { path: string }).path)}?edit=1`);
       },
     );
 
@@ -147,22 +152,22 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
       </ul>
 
       <div className="mt-2 flex flex-col border-t border-line pt-2">
-        <SideLink href="/proposals" active={pathname === "/proposals"} icon={<GitPullRequestArrow className="size-4" />}>
+        <SideLink href={`${base}/proposals`} pathname={pathname} icon={<GitPullRequestArrow className="size-4" />}>
           Proposals
           {proposalCount > 0 && (
             <span className="ml-auto rounded-full bg-accent px-1.5 text-xs text-accent-foreground">{proposalCount}</span>
           )}
         </SideLink>
-        <SideLink href="/lint" active={pathname === "/lint"} icon={<ListChecks className="size-4" />}>
+        <SideLink href={`${base}/lint`} pathname={pathname} icon={<ListChecks className="size-4" />}>
           Lint
         </SideLink>
-        <SideLink href="/jobs" active={pathname === "/jobs"} icon={<Activity className="size-4" />}>
+        <SideLink href={`${base}/jobs`} pathname={pathname} icon={<Activity className="size-4" />}>
           Jobs
         </SideLink>
-        <SideLink href="/pipeline" active={pathname === "/pipeline"} icon={<Workflow className="size-4" />}>
+        <SideLink href={`${base}/pipeline`} pathname={pathname} icon={<Workflow className="size-4" />}>
           Pipeline
         </SideLink>
-        <SideLink href="/explain" active={pathname === "/explain"} icon={<SearchCode className="size-4" />}>
+        <SideLink href={`${base}/explain`} pathname={pathname} icon={<SearchCode className="size-4" />}>
           How search works
         </SideLink>
       </div>
@@ -170,7 +175,8 @@ export function PageTree({ initialTree, proposalCount }: { initialTree: TreeNode
   );
 }
 
-function SideLink({ href, active, icon, children }: { href: string; active: boolean; icon: ReactNode; children: ReactNode }) {
+function SideLink({ href, pathname, icon, children }: { href: string; pathname: string; icon: ReactNode; children: ReactNode }) {
+  const active = pathname === href;
   return (
     <Link
       href={href}
@@ -220,10 +226,10 @@ function TreeItem({
         onCancel={() => ctx.setRenaming(null)}
         onSubmit={(title) =>
           ctx.act(
-            () => renamePageAction({ pageId: node.id, title }),
+            () => renamePageAction({ wiki: ctx.slug, pageId: node.id, title }),
             (data) => {
               ctx.setRenaming(null);
-              if (active) router.replace(wikiRoute((data as { path: string }).path));
+              if (active) router.replace(wikiRoute(ctx.slug, (data as { path: string }).path));
             },
           )
         }
@@ -232,7 +238,7 @@ function TreeItem({
   }
 
   const move = (newParentId: string | null, at?: number) =>
-    ctx.act(() => movePageAction({ pageId: node.id, newParentId, index: at }));
+    ctx.act(() => movePageAction({ wiki: ctx.slug, pageId: node.id, newParentId, index: at }));
 
   return (
     <li>
@@ -248,7 +254,7 @@ function TreeItem({
         >
           <ChevronRight className={`size-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
         </button>
-        <Link href={wikiRoute(node.path)} className="min-w-0 flex-1 truncate py-0.5" title={node.path}>
+        <Link href={wikiRoute(ctx.slug, node.path)} className="min-w-0 flex-1 truncate py-0.5" title={node.path}>
           {node.title}
         </Link>
         {node.hasPendingProposal && (
@@ -298,8 +304,8 @@ function TreeItem({
               onClick={() => {
                 if (!window.confirm(`Delete "${node.title}" and its history?`)) return ctx.setMenuFor(null);
                 ctx.act(
-                  () => deletePageAction({ pageId: node.id }),
-                  () => active && router.push("/"),
+                  () => deletePageAction({ wiki: ctx.slug, pageId: node.id }),
+                  () => active && router.push(wikiBase(ctx.slug)),
                 );
               }}
             >

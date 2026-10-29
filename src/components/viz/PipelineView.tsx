@@ -7,7 +7,9 @@ import { repoTimelineSchema } from "@/core/api-schemas";
 import { activeStage, deriveStages } from "@/jobs/stages";
 import type { RepoTimeline } from "@/jobs/timeline";
 import { fetchJson } from "@/lib/fetch-json";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
+import { apiBase } from "@/wiki/routes";
 import { StageRail } from "./StageRail";
 import { useNow } from "./useNow";
 
@@ -17,14 +19,15 @@ const REPLAY_MS = 20_000;
 
 type Replay = { startedAt: number; from: number } | null;
 
-const fetchTimeline = (repo: string | null, run: string | null) => {
+const fetchTimeline = (slug: string, repo: string | null, run: string | null) => {
   const q = new URLSearchParams();
   if (repo) q.set("repo", repo);
   if (run) q.set("run", run);
-  return fetchJson(`/api/pipeline?${q}`, repoTimelineSchema);
+  return fetchJson(`${apiBase(slug)}/pipeline?${q}`, repoTimelineSchema);
 };
 
 export function PipelineView({ initial }: { initial: RepoTimeline }) {
+  const { slug } = useWiki();
   const [repoId, setRepoId] = useState<string | null>(initial.repo?.id ?? null);
   const [run, setRun] = useState<string | null>(null);
   /** null: follow the end of the run (live). A number: replay position in the event list. */
@@ -32,8 +35,8 @@ export function PipelineView({ initial }: { initial: RepoTimeline }) {
   const [replay, setReplay] = useState<Replay>(null);
 
   const timeline = useQuery({
-    queryKey: queryKeys.jobs.timeline(repoId, run),
-    queryFn: () => fetchTimeline(repoId, run),
+    queryKey: queryKeys.jobs.timeline(slug, repoId, run),
+    queryFn: () => fetchTimeline(slug, repoId, run),
     initialData: repoId === (initial.repo?.id ?? null) && run === null ? initial : undefined,
     refetchInterval: (q) => (q.state.data?.live ? LIVE_POLL_MS : false),
   });

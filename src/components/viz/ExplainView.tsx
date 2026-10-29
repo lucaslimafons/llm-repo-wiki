@@ -7,7 +7,9 @@ import { MAX_ANSWER_CHUNKS } from "@/search/constants";
 import { explainAnswerSchema, searchExplanationSchema } from "@/core/api-schemas";
 import { Markdown } from "@/components/markdown/Markdown";
 import { fetchJson } from "@/lib/fetch-json";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
+import { apiBase } from "@/wiki/routes";
 import type { ExplainItem, SearchExplanation } from "@/search/explain";
 
 /** Fixed geometry: rows never measure the DOM, so the lines between lists are plain arithmetic. */
@@ -27,7 +29,8 @@ const STEPS = [
 ] as const;
 
 const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-const fetchExplain = (query: string, rerank: boolean) => fetchJson("/api/explain", searchExplanationSchema, post({ query, rerank }));
+const fetchExplain = (slug: string, query: string, rerank: boolean) =>
+  fetchJson(`${apiBase(slug)}/explain`, searchExplanationSchema, post({ query, rerank }));
 
 const label = (i: ExplainItem) => (i.hit.kind === "source" ? `${i.hit.path}#L${i.hit.startLine}-L${i.hit.endLine}` : `wiki: ${i.hit.pagePath}`);
 /** The file or page name: what a reader recognizes in a narrow row. */
@@ -38,6 +41,7 @@ const origin = (i: ExplainItem) =>
 const rrfTerm = (k: number, r: number | null) => (r === null ? null : `1/(${k}+${r})`);
 
 export function ExplainView({ initialQuery }: { initialQuery: string }) {
+  const { slug } = useWiki();
   const [input, setInput] = useState(initialQuery);
   const [query, setQuery] = useState(initialQuery);
   const [step, setStep] = useState(0);
@@ -45,15 +49,15 @@ export function ExplainView({ initialQuery }: { initialQuery: string }) {
   const [pinned, setPinned] = useState<string | null>(null);
 
   const search = useQuery({
-    queryKey: queryKeys.explain.search(query),
-    queryFn: () => fetchExplain(query, false),
+    queryKey: queryKeys.explain.search(slug, query),
+    queryFn: () => fetchExplain(slug, query, false),
     enabled: query.length > 0,
     staleTime: Infinity,
   });
   // Paid and optional: its own request, so a failure stays in the rerank panel instead of blanking the board.
-  const rerank = useMutation({ mutationFn: () => fetchExplain(query, true) });
+  const rerank = useMutation({ mutationFn: () => fetchExplain(slug, query, true) });
   const answer = useMutation({
-    mutationFn: (keys: string[]) => fetchJson("/api/explain/answer", explainAnswerSchema, post({ query, keys })),
+    mutationFn: (keys: string[]) => fetchJson(`${apiBase(slug)}/explain/answer`, explainAnswerSchema, post({ query, keys })),
   });
 
   const submit = (e: React.FormEvent) => {
@@ -398,6 +402,7 @@ function RerankPanel({ x, loading, error, onRerank }: { x: SearchExplanation; lo
 type AnswerState = ReturnType<typeof useMutation<import("@/agent/explain-answer").ExplainAnswer, Error, string[]>>;
 
 function AnswerPanel({ count, reranked, state, onGenerate }: { count: number; reranked: boolean; state: AnswerState; onGenerate: () => void }) {
+  const { slug } = useWiki();
   const a = state.data;
   return (
     <div className="mt-4 max-w-3xl">
@@ -416,7 +421,7 @@ function AnswerPanel({ count, reranked, state, onGenerate }: { count: number; re
       {a && (
         <div className="flex flex-col gap-3">
           <div className="rounded-lg border border-line bg-surface p-3">
-            <Markdown>{a.answerMd}</Markdown>
+            <Markdown wikiSlug={slug}>{a.answerMd}</Markdown>
             <p className="mt-2 text-xs text-muted">
               {a.tokens.toLocaleString("en-US")} tokens · ${a.costUsd.toFixed(4)}
             </p>

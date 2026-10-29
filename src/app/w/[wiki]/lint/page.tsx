@@ -4,7 +4,8 @@ import { db } from "@/db/client";
 import { findLintIssues, type LintFinding } from "@/wiki/lint";
 import { wikiRoute } from "@/wiki/routes";
 import { Suspense } from "react";
-import { PageFallback } from "@/app/(wiki)/fallback";
+import { PageFallback } from "@/app/w/[wiki]/fallback";
+import { requireWiki } from "@/wikis/server";
 
 const LABELS: Record<LintFinding["kind"], { title: string; hint: string }> = {
   dead_link: { title: "Dead links", hint: "A wiki: link points to a page that no longer exists." },
@@ -21,9 +22,10 @@ function detail(f: LintFinding) {
 }
 
 /** Computed live; the scheduled lint-wiki job writes the same findings to wiki_log. */
-async function LintPageContent() {
+async function LintPageContent({ params }: Pick<PageProps<"/w/[wiki]/lint">, "params">) {
   await connection();
-  const findings = await findLintIssues(db());
+  const wiki = await requireWiki((await params).wiki);
+  const findings = await findLintIssues(db(), wiki.id);
   const groups = Object.keys(LABELS) as LintFinding["kind"][];
   return (
     <div className="mx-auto max-w-4xl px-8 py-6">
@@ -44,7 +46,7 @@ async function LintPageContent() {
             <ul className="divide-y divide-line rounded-md border border-line bg-surface">
               {items.map((f, i) => (
                 <li key={`${f.pageId}-${i}`} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                  <Link href={wikiRoute(f.path)} className="text-accent hover:underline">
+                  <Link href={wikiRoute(wiki.slug, f.path)} className="text-accent hover:underline">
                     {f.path}
                   </Link>
                   {detail(f)}
@@ -58,10 +60,10 @@ async function LintPageContent() {
   );
 }
 
-export default function LintPage() {
+export default function LintPage({ params }: PageProps<"/w/[wiki]/lint">) {
   return (
     <Suspense fallback={<PageFallback />}>
-      <LintPageContent />
+      <LintPageContent params={params} />
     </Suspense>
   );
 }

@@ -3,15 +3,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MessageSquarePlus, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { useWiki } from "@/components/wikis/WikiContext";
 import { queryKeys } from "@/lib/query-keys";
 import { chatApi } from "./api";
 import { ChatThread } from "./ChatThread";
 
 /** Loads a session's stored history fresh on every open, then hands it to useChat. */
-function ChatSession({ chatId }: { chatId: string }) {
+function ChatSession({ slug, chatId }: { slug: string; chatId: string }) {
   const history = useQuery({
-    queryKey: queryKeys.chat.messages(chatId),
-    queryFn: () => chatApi.messages(chatId),
+    queryKey: queryKeys.chat.messages(slug, chatId),
+    queryFn: () => chatApi.messages(slug, chatId),
     // Never seed useChat from a cached copy: the server may have newer turns (another tab, a reload).
     staleTime: 0,
     gcTime: 0,
@@ -28,22 +29,23 @@ function ChatSession({ chatId }: { chatId: string }) {
 }
 
 export function ChatPanel() {
+  const { slug } = useWiki();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
-  const chats = useQuery({ queryKey: queryKeys.chat.list(), queryFn: chatApi.list });
+  const chats = useQuery({ queryKey: queryKeys.chat.list(slug), queryFn: () => chatApi.list(slug) });
 
   const create = useMutation({
-    mutationFn: chatApi.create,
+    mutationFn: () => chatApi.create(slug),
     onSuccess: (chat) => {
       setSelected(chat.id);
-      return queryClient.invalidateQueries({ queryKey: queryKeys.chat.list() });
+      return queryClient.invalidateQueries({ queryKey: queryKeys.chat.list(slug) });
     },
   });
   const remove = useMutation({
-    mutationFn: chatApi.remove,
+    mutationFn: (id: string) => chatApi.remove(slug, id),
     onSuccess: () => {
       setSelected(null);
-      return queryClient.invalidateQueries({ queryKey: queryKeys.chat.list() });
+      return queryClient.invalidateQueries({ queryKey: queryKeys.chat.list(slug) });
     },
   });
 
@@ -96,7 +98,7 @@ export function ChatPanel() {
           <Loader2 className="size-4 animate-spin" />
         </div>
       ) : activeId ? (
-        <ChatSession key={activeId} chatId={activeId} />
+        <ChatSession key={activeId} slug={slug} chatId={activeId} />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-sm text-muted">
           <p>Chat with the wiki agent.</p>
