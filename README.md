@@ -13,6 +13,10 @@ chat with the wiki, and the chat can edit it too.
 [![CI](https://github.com/lucaslimafons/llm-repo-wiki/actions/workflows/ci.yml/badge.svg)](https://github.com/lucaslimafons/llm-repo-wiki/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
+![Adding pmndrs/zustand to a new wiki: the sync pipeline runs stage by stage, the author agent proposes pages, and the Overview proposal opens with its citations](docs/img/demo.gif)
+
+*A new wiki for [pmndrs/zustand](https://github.com/pmndrs/zustand): first sync, the author writing pages, then reviewing a proposal. Sped up; about 4 minutes in real time.*
+
 This is a study project for learning retrieval-augmented generation (RAG) end to end. It runs
 locally with `docker compose` and `pnpm`, and is not meant to be deployed: there is no login, by
 design, so everything binds to `127.0.0.1`.
