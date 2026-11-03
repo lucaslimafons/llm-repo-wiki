@@ -24,7 +24,8 @@
     "repo:add": "tsx --env-file=.env.local scripts/add-repo.ts",
     "bench:author": "tsx --env-file=.env.local scripts/bench-author.ts",
     "bench:chat": "tsx --env-file=.env.local scripts/bench-chat.ts",
-    "bench:mcp": "tsx scripts/bench-mcp.ts"
+    "bench:mcp": "tsx scripts/bench-mcp.ts",
+    "eval:citations": "tsx --env-file=.env.local scripts/eval-citations.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "4.0.152",
