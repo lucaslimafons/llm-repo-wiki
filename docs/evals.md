@@ -9,7 +9,9 @@ real runs of this project against one repository, through OpenRouter.
 
 Use Claude Haiku 5.5 for both chat and wiki writing, and hybrid search plus a reranker for retrieval.
 On zustand that set-up wrote a 24-page wiki with 276 citations, none invented, for $0.09, and answered
-chat questions at $0.003 each.
+chat questions at $0.003 each. In a later wiki, 87% of cited sentences matched their cited lines; about
+1 in 20 had a factual slip, such as `create<T>(...)` for the curried `create<T>()(...)`
+([Eval 6](#eval-6-citation-precision)).
 
 | Decision | Pick | Evidence |
 | --- | --- | --- |
@@ -252,6 +254,72 @@ the pipeline.
 
 The grounding check came out of #1. Because the job now picks the evidence, it can verify every citation
 against it, and that verification is impossible when the model searches for itself.
+
+## Eval 6: Citation precision
+
+**87% of cited sentences say what their cited lines say.** The grounding check only proves that a
+citation points at lines the job retrieved. This eval asks the next question: does the sentence match
+those lines? It ran on the zustand wiki that Haiku 5.5 wrote (21 pages, 286 cited sentences).
+
+**Method.** `pnpm eval:citations` splits every page into sentences and keeps each one that cites a
+source. It reads the cited lines at the cited commit. Two judges from different vendors, Claude Sonnet
+5.5 and GPT-5.5, then label each pair `supported`, `partial` or `unsupported`. Each judge must quote
+the line that supports the claim, and a quote that is not in the lines is flagged. Neither judge is
+the author model.
+
+**Checking the judges without human labels.** A judge that says "supported" too easily would make the
+wiki look better than it is. To measure that, the eval adds 68 planted pairs: real sentences with their
+citation swapped for other lines, 33 from the same file and 35 from another file. Their answer is known
+in advance: the new lines should not support the sentence.
+
+| | Claude Sonnet 5.5 | GPT-5.5 |
+| --- | --- | --- |
+| supported | 85.7% | 82.3% |
+| partial | 12.5% | 16.5% |
+| unsupported | 1.9% | 1.2% |
+| planted wrong citations rejected | 54/58 (93%) | 57/60 (95%) |
+| cost | $1.17 | $3.31 |
+
+The judges agree on 215 of the 230 sentences they both judged (93.5%, Cohen's kappa 0.76, where 1 is
+perfect agreement and 0 is chance). Where they agree: 187 supported (87.0%), 25 partial, 3 unsupported.
+
+**What the runs showed:**
+
+- **The judges were not lenient.** Every planted pair a judge accepted was read by hand, and in all
+  five the swapped lines really did support the sentence. The docs and types repeat the same fact
+  in several places, so a same-file decoy can be right by chance. No judge accepted a decoy that was
+  actually wrong.
+- **All three rejected sentences are true, but cite the wrong lines.** `useCallback` is on line 32 of
+  `react.ts`; the page cites line 31. The grounding check accepts any range inside a retrieved chunk,
+  so the model can narrow a chunk to the wrong lines and still pass.
+- **The 25 agreed `partial` sentences are three kinds,** read by hand:
+  - **11 factual slips** (about 5% of the agreed sentences). Four write `create<T>(...)` where
+    zustand's TypeScript form is the curried `create<T>()(...)`. Others write `getState.count` for
+    `getState().count`, say "afterwards" where the docs say "before", or claim a custom `merge` keeps
+    a change that the cited test shows being overwritten.
+  - **7 ranges cut too short:** the sentence describes a function's body, and the citation stops at
+    its signature. The same near miss as the rejected three.
+  - **7 overreaches in wording or context,** such as calling listed middlewares "community" ones, or
+    "This matches `useState`" with no clear subject.
+- **GPT-5.5 is stricter about wording**, and cost 3× as much. Most of the 15 disputes are GPT marking
+  `partial` for phrases like "the official docs". Sonnet alone plus planted pairs is enough for a
+  routine run.
+
+**Coverage.** The run stopped at the OpenRouter key's spend limit with 631 of 708 verdicts made. 56
+sentences have one verdict or none, so the 87% is over the 215 agreed sentences. If every missing one
+had been agreed and unsupported, the rate would be 69%; the trend in the judged ones makes that very
+unlikely. Two sentences were judged with garbled text, from a link-stripping bug fixed after the run.
+
+To repeat it, clone the indexed repo at the synced commit, then:
+
+```bash
+pnpm eval:citations --wiki zustand --checkout pmndrs/zustand=/path/to/zustand
+pnpm eval:citations --wiki zustand --checkout pmndrs/zustand=/path/to/zustand --judges anthropic/claude-sonnet-5.5   # one judge, ~¼ the cost
+```
+
+A run that stops on a spend limit or a rate limit prints a `--resume` command that finishes it without
+paying twice. Results go to `eval/results/citations/` (gitignored): `disputed.md`, `unsupported.md` and
+`planted-missed.md` hold the pairs worth reading.
 
 ## Cost projection
 

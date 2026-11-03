@@ -45,6 +45,7 @@ Only a `push` to the default branch triggers a sync. A merged PR produces exactl
 | `pnpm bench:chat`, `pnpm bench:author` | Compare models on the real chat agent and author job |
 | `pnpm mcp --wiki <slug>` / `pnpm mcp:smoke "question" --wiki <slug>` | Run the MCP server for one wiki over stdio / check it end to end as a client would |
 | `pnpm bench:mcp` | Claude Code with vs. without the MCP server ([how it works](mcp.md#measuring-it)) |
+| `pnpm eval:citations --wiki <slug> --checkout owner/name=<clone>` | Judge whether each cited sentence matches its cited lines ([Eval 6](evals.md#eval-6-citation-precision)) |
 | `pnpm test` / `pnpm typecheck` / `pnpm lint` | Tests against a real Postgres, plus checks |
 
 ## Troubleshooting
