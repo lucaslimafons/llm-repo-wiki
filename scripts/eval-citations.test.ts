@@ -15,6 +15,8 @@ const body = [
   `- Wrap the creator in \`persist\` ${src("README.md", 296, 311)}.`,
   `- Pass a storage ${src("README.md", 308, 308)} ${src("README.md", 308, 308)}.`,
   `- Equality works like \`create\` (${src("src/traditional.ts", 1, 9)}).`,
+  `- The Persist API is documented in ${src("docs/persist.md", 1, 20)}.`,
+  `- Edges come from the imports cited above (${src("src/a.ts", 1, 1)}, ${src("src/b.ts", 2, 2)}).`,
   "",
   "```ts",
   `const x = 1 // ${src("src/x.ts", 1, 2)}`,
@@ -33,6 +35,8 @@ describe("extractClaims", () => {
       ["Setup", "Wrap the creator in `persist`."],
       ["Setup", "Pass a storage."],
       ["Setup", "Equality works like `create`."],
+      ["Setup", "The Persist API is documented in [persist.md#L1-L20]."],
+      ["Setup", "Edges come from the imports cited above."],
     ]);
   });
 

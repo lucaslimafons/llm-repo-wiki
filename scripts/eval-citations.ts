@@ -80,7 +80,11 @@ export function extractClaims(page: string, bodyMd: string): Claim[] {
         if (c && !citations.some((x) => formatSourceHref(x) === formatSourceHref(c))) citations.push(c);
       }
       if (!citations.length) continue;
-      const text = sentence.replace(LINK_RE, "").replace(/\(\s*\)/g, "").replace(/\s+([.,;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+      // A link is usually just the citation and is dropped; when the sentence would then end on "in" or
+      // "see", the link was its object ("documented in [x]"), so it keeps its text.
+      const tidy = (s: string) => s.replace(/\(\s*[,;]?\s*\)/g, "").replace(/\s+([.,;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+      const dropped = tidy(sentence.replace(LINK_RE, ""));
+      const text = /\b(in|at|see|from|by|to|under|of|on)[.!?]?$/i.test(dropped) ? tidy(sentence.replace(LINK_RE, "[$1]")) : dropped;
       out.push({ id: `${page}#${out.length + 1}`, page, heading: b.heading, text, citations });
     }
   }
@@ -358,7 +362,8 @@ async function main() {
     ].join("\n");
   };
   const verdictOf = (p: Pair, j: string) => judgments.find((x) => x.judge === j && x.pairId === p.id);
-  const disputed = pairs.filter((p) => !p.planted && new Set(judges.map((j) => verdictOf(p, j)?.verdict)).size > 1);
+  const judged = (p: Pair) => judges.map((j) => verdictOf(p, j)).filter((j) => j && !j.error);
+  const disputed = pairs.filter((p) => !p.planted && judged(p).length === judges.length && new Set(judged(p).map((j) => j!.verdict)).size > 1);
   const missedPlants = pairs.filter((p) => p.planted && judges.some((j) => verdictOf(p, j)?.verdict === "supported"));
   const agreedUnsupported = pairs.filter((p) => !p.planted && judges.every((j) => verdictOf(p, j)?.verdict === "unsupported"));
   await writeFile(join(outDir, "results.json"), JSON.stringify({ judges, pairs, judgments, truncated: [...excerpts].filter(([, e]) => e.truncated).map(([id]) => id) }, null, 2));
