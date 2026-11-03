@@ -5,16 +5,17 @@
  * answer that measure how lenient each judge is.
  *
  *   pnpm eval:citations --wiki <slug> --checkout owner/name=/path/to/clone [--checkout …]
- *     [--judges a,b] [--plant 0.2] [--limit n] [--seed 1]
+ *     [--judges a,b] [--plant 0.2] [--limit n] [--seed 1] [--resume eval/results/citations/<run>]
  */
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { Citation } from "@/core/contracts";
+import { isSystemicError } from "@/agent/author";
 import { stepCost } from "@/agent/runs";
 import { formatSourceHref, parseSourceHref } from "@/lib/source-links";
 
@@ -248,18 +249,36 @@ async function main() {
   const rate = Number(arg("plant") ?? 0.2);
   const limit = arg("limit") ? Number(arg("limit")) : undefined;
   const rng = mulberry32(Number(arg("seed") ?? 1));
+  // Resume reuses the earlier run's pairs (same plants) and every judgment that did not error.
+  const resumeDir = arg("resume");
+  const previous = resumeDir
+    ? (JSON.parse(await readFile(join(resumeDir, "results.json"), "utf8")) as { pairs: Pair[]; judgments: Judgment[] })
+    : undefined;
 
-  // The approved revision when there is one, otherwise the newest proposal.
-  const rows = await db().execute<{ path: string; body_md: string }>(sql`
-    select coalesce(cur.title, latest.title) as path, coalesce(cur.body_md, latest.body_md) as body_md
-    from pages p join wikis w on w.id = p.wiki_id
-    left join page_revisions cur on cur.id = p.current_revision_id
-    left join lateral (select title, body_md from page_revisions r where r.page_id = p.id order by r.created_at desc limit 1) latest on true
-    where w.slug = ${slug} order by p.title`);
-  if (!rows.length) throw new Error(`wiki "${slug}" has no pages`);
-  let claims = rows.flatMap((r) => extractClaims(r.path, r.body_md));
-  if (limit) claims = claims.slice(0, limit);
-  const pairs = plantDecoys(claims, rate, rng);
+  let pairs: Pair[];
+  if (previous) pairs = previous.pairs;
+  else {
+    // Full path, not title: siblings under different parents can share a title, and the id must be unique.
+    // The approved revision when there is one, otherwise the newest proposal.
+    const rows = await db().execute<{ path: string; body_md: string }>(sql`
+      with recursive tree as (
+        select p.id, p.title::text as path from pages p join wikis w on w.id = p.wiki_id where w.slug = ${slug} and p.parent_id is null
+        union all
+        select c.id, tree.path || '/' || c.title from pages c join tree on c.parent_id = tree.id
+      )
+      select tree.path, coalesce(cur.body_md, latest.body_md) as body_md
+      from tree join pages p on p.id = tree.id
+      left join page_revisions cur on cur.id = p.current_revision_id
+      left join lateral (select body_md from page_revisions r where r.page_id = p.id order by r.created_at desc limit 1) latest on true
+      order by tree.path`);
+    if (!rows.length) throw new Error(`wiki "${slug}" has no pages`);
+    let claims = rows.flatMap((r) => extractClaims(r.path, r.body_md));
+    if (limit) claims = claims.slice(0, limit);
+    pairs = plantDecoys(claims, rate, rng);
+  }
+  if (new Set(pairs.map((p) => p.id)).size !== pairs.length) throw new Error("pair ids collide: judgments would be filed under the wrong claim");
+  const kept = (previous?.judgments ?? []).filter((j) => !j.error && judges.includes(j.judge));
+  const keptKeys = new Set(kept.map((j) => `${j.judge} ${j.pairId}`));
 
   const exec = promisify(execFile);
   const files = new Map<string, string[]>();
@@ -285,9 +304,16 @@ async function main() {
   const provider = createOpenRouter({ apiKey: openRouterKey() });
   const models: Record<string, LanguageModel> = Object.fromEntries(judges.map((j) => [j, provider.chat(j, { usage: { include: true }, ...providerPrivacy() })]));
   // Shuffled, so planted pairs are not judged next to the claim they copy.
-  const tasks = judges.flatMap((judge) => pairs.map((pair) => ({ judge, pair, k: rng() }))).sort((a, b) => a.k - b.k);
+  const tasks = judges
+    .flatMap((judge) => pairs.map((pair) => ({ judge, pair, k: rng() })))
+    .filter((t) => !keptKeys.has(`${t.judge} ${t.pair.id}`))
+    .sort((a, b) => a.k - b.k);
+  console.error(`${tasks.length} judgments to make${kept.length ? `, ${kept.length} reused` : ""}`);
   let done = 0;
-  const judgments = await pool(tasks, CONCURRENCY, async ({ judge, pair }): Promise<Judgment> => {
+  // Out of credit, rate-limited or a revoked key: every later call fails the same way, so stop.
+  let stopped: string | undefined;
+  const fresh = await pool(tasks, CONCURRENCY, async ({ judge, pair }): Promise<Judgment | undefined> => {
+    if (stopped) return undefined;
     const ex = excerpts.get(pair.id)!.text;
     try {
       const out = await generateText({
@@ -303,15 +329,21 @@ async function main() {
       return { judge, pairId: pair.id, ...j, quoteValid: quoteFound(j.quote, ex), costUsd: stepCost(out.providerMetadata) };
     } catch (err) {
       done++;
-      return { judge, pairId: pair.id, verdict: "unsupported", quote: "", missing: "", quoteValid: false, costUsd: 0, error: String(err instanceof Error ? err.message : err).slice(0, 300) };
+      const error = String(err instanceof Error ? err.message : err).slice(0, 300);
+      if (isSystemicError(err)) {
+        stopped ??= error;
+        return undefined;
+      }
+      return { judge, pairId: pair.id, verdict: "unsupported", quote: "", missing: "", quoteValid: false, costUsd: 0, error };
     }
   });
+  const judgments = [...kept, ...fresh.filter((j): j is Judgment => !!j)];
 
   const outDir = join(process.cwd(), "eval/results/citations", new Date().toISOString().replace(/[:.]/g, "-"));
   await mkdir(outDir, { recursive: true });
   const summary = summarize(pairs, judgments, judges);
   const view = (p: Pair) => {
-    const js = judges.map((j) => judgments.find((x) => x.judge === j && x.pairId === p.id)!);
+    const js = judges.map((j) => judgments.find((x) => x.judge === j && x.pairId === p.id) ?? { judge: j, error: "not judged (run stopped early)" } as Judgment);
     return [
       `### ${p.id}${p.planted ? ` (planted, ${p.decoy})` : ""}`,
       `> ${p.text}`,
@@ -337,6 +369,10 @@ async function main() {
   console.log(summary);
   console.log(`\nResults: ${outDir}`);
   await db().$client.end();
+  if (stopped) {
+    console.error(`\nStopped early: ${stopped}\nFix it, then finish with: pnpm eval:citations --wiki ${slug} ${args("checkout").map((c) => `--checkout ${c}`).join(" ")} --resume ${outDir}`);
+    process.exit(1);
+  }
 }
 
 if (process.argv[1]?.endsWith("eval-citations.ts")) {
