@@ -22,7 +22,7 @@ chat questions at $0.003 each. In a later wiki, 87% of cited sentences matched t
 The reranker is measured here but not yet used by the app; the app searches with plain hybrid RRF
 today. See [Retrieval and reranking](models.md#retrieval-and-reranking). Rerankers no longer run
 with zero data retention on, and a vectorless walk over the wiki's own outline reached recall@5 0.90
-at $0.0008 a question ([Vectorless: walking the wiki tree](#vectorless-walking-the-wiki-tree)).
+(0.95 with the reranker) with better ranking, at $0.0008 a question ([Vectorless: walking the wiki tree](#vectorless-walking-the-wiki-tree)).
 
 The cheapest models failed in ways a price list doesn't show:
 
@@ -148,12 +148,16 @@ to Claude Haiku 5.5:
    `[c12 src/vanilla.ts#L10-L40]`, and returns the citations most likely to hold the answer, best
    first. The cited files are the results.
 
-It found the right file for 18 of 20 questions in each of three runs, against 16 for the best plain
-search measured the same day:
+It found the right file for 18 of 20 questions in each of three runs. Hybrid search plus
+rerank-4-pro found 19, but the walk ranked the right file higher and cost a third as much. All rows
+were measured the same day:
 
 | Strategy (2026-11-06) | Recall@5 | MRR@10 | Latency/query | Cost/query |
 | --- | --- | --- | --- | --- |
+| hybrid + rerank-4-pro | 0.95 | 0.727 | 1,248 ms | $0.0025 |
 | wiki tree, Haiku 5.5 (3 runs) | 0.90 | 0.789–0.850 | 2.4–2.7 s | $0.0008 |
+| hybrid + rerank-4-fast | 0.90 | 0.693 | 1,156 ms | $0.002 |
+| vector + rerank-4-fast | 0.90 | 0.706 | 1,067 ms | $0.002 |
 | hybrid RRF 3:1 | 0.80 | 0.615 | 537 ms | $0 |
 | hybrid RRF 2:1 | 0.75 | 0.575 | 560 ms | $0 |
 | hybrid RRF 1:1 | 0.70 | 0.589 | 545 ms | $0 |
@@ -162,18 +166,21 @@ search measured the same day:
 - **Both misses are coverage gaps, not search errors.** The Immer and `combine` questions have no
   answer in the wiki: no page cites `immer.ts`, `combine.ts` or their docs. On the 18 questions the
   wiki covers, the walk found the file every time. It can never beat the wiki it walks.
-- **It ranks better.** MRR is 0.79–0.85 against 0.62 for the best hybrid, so the right file is
-  usually first.
+- **It ranks better.** MRR is 0.79–0.85 against 0.73 with the best reranker and 0.62 for the best
+  plain hybrid, so the right file is usually first.
+- **They miss different questions.** The reranker's one miss ("create a store without React") is a
+  question the walk answers, and the walk's two misses are ones the reranker answers. Using the
+  reranker when the walk finds nothing would cover all 20; that combination is not built yet.
 - **It costs a call per question instead of an index.** About $0.0008 and 2.5 s per question, and it
   needs a written wiki first ($0.09 for zustand). The outline of 21 pages fits in one call; a wiki of
   hundreds of pages would need another level of navigation, and more calls.
 - **The comparison is partly circular.** The wiki was written by an author that retrieved through
   hybrid search, so the walk inherits what that search found.
-- **No reranker baseline today.** With `OPENROUTER_ZDR=true`, OpenRouter has no zero-retention
-  endpoint for `cohere/rerank-4-pro` or `rerank-4-fast`, so both now fail with a 404. The 0.95 above
-  was measured before ZDR routing became the default.
-- **The search numbers moved.** The unchanged eval gives 0.70 for hybrid 1:1 today against 0.80 on
-  2026-10-22. The code is the same (checked by running the old `eval/run.ts`), so the corpus or the
+- **Rerankers need zero data retention off.** OpenRouter has no zero-retention endpoint for
+  `cohere/rerank-4-pro` or `rerank-4-fast`, so with `OPENROUTER_ZDR=true` (or ZDR required in the
+  OpenRouter account) both fail with a 404. The reranker rows above ran with both off, on public code.
+- **The plain search numbers moved.** The unchanged eval gives 0.70 for hybrid 1:1 today against
+  0.80 on 2026-10-22, while hybrid + rerank-4-pro still gives 0.95. The code is the same (checked by running the old `eval/run.ts`), so the corpus or the
   embedding provider changed; compare strategies within one day, not across days.
 
 Run `pnpm eval "wiki tree"`; set `EVAL_TREE_MODEL` to try another model. The repo must already have
