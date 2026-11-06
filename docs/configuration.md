@@ -41,7 +41,7 @@ Only a `push` to the default branch triggers a sync. A merged PR produces exactl
 | `pnpm dev` / `pnpm worker` | Web app / background job worker |
 | `pnpm repo:add owner/name [--wiki <slug>]` | Add a repo to a wiki and queue its first sync |
 | `pnpm export --out <dir> [--wiki <slug>]` | Write a wiki's accepted pages as a folder of markdown that renders on GitHub |
-| `pnpm eval` | Retrieval eval: 8 search strategies, recall@5 and MRR |
+| `pnpm eval [filter]` | Retrieval eval: 8 search strategies plus the vectorless wiki-tree walk, recall@5 and MRR |
 | `pnpm bench:chat`, `pnpm bench:author` | Compare models on the real chat agent and author job |
 | `pnpm mcp --wiki <slug>` / `pnpm mcp:smoke "question" --wiki <slug>` | Run the MCP server for one wiki over stdio / check it end to end as a client would |
 | `pnpm bench:mcp` | Claude Code with vs. without the MCP server ([how it works](mcp.md#measuring-it)) |
