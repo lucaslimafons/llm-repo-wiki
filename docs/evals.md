@@ -20,7 +20,9 @@ chat questions at $0.003 each. In a later wiki, 87% of cited sentences matched t
 | Retrieval | hybrid + `cohere/rerank-4-pro` | Recall@5 0.95 vs 0.85 vector-only and 0.80 plain hybrid; +$0.0025 and about +0.7 s per search |
 
 The reranker is measured here but not yet used by the app; the app searches with plain hybrid RRF
-today. See [Retrieval and reranking](models.md#retrieval-and-reranking).
+today. See [Retrieval and reranking](models.md#retrieval-and-reranking). Rerankers no longer run
+with zero data retention on, and a vectorless walk over the wiki's own outline reached recall@5 0.90
+at $0.0008 a question ([Vectorless: walking the wiki tree](#vectorless-walking-the-wiki-tree)).
 
 The cheapest models failed in ways a price list doesn't show:
 
@@ -133,6 +135,49 @@ candidates and costs time and a little money:
 Latency includes one embedding call to OpenRouter (~550 ms) for every strategy except full-text.
 Full-text alone missed 9 of 20, mostly conceptual questions ("create a store without React") with no
 shared keywords.
+
+### Vectorless: walking the wiki tree
+
+The wiki is already a table of contents over the code, so it can be searched with no embeddings at
+all, the way PageIndex searches a PDF. [`src/search/tree.ts`](../src/search/tree.ts) makes two calls
+to Claude Haiku 5.5:
+
+1. It reads an outline with one line per page (path, lead sentence, section headings) and picks up
+   to 3 pages.
+2. It reads those pages, with each citation replaced by a numbered marker such as
+   `[c12 src/vanilla.ts#L10-L40]`, and returns the citations most likely to hold the answer, best
+   first. The cited files are the results.
+
+It found the right file for 18 of 20 questions in each of three runs, against 16 for the best plain
+search measured the same day:
+
+| Strategy (2026-11-06) | Recall@5 | MRR@10 | Latency/query | Cost/query |
+| --- | --- | --- | --- | --- |
+| wiki tree, Haiku 5.5 (3 runs) | 0.90 | 0.789–0.850 | 2.4–2.7 s | $0.0008 |
+| hybrid RRF 3:1 | 0.80 | 0.615 | 537 ms | $0 |
+| hybrid RRF 2:1 | 0.75 | 0.575 | 560 ms | $0 |
+| hybrid RRF 1:1 | 0.70 | 0.589 | 545 ms | $0 |
+| full-text only | 0.55 | 0.366 | 7 ms | $0 |
+
+- **Both misses are coverage gaps, not search errors.** The Immer and `combine` questions have no
+  answer in the wiki: no page cites `immer.ts`, `combine.ts` or their docs. On the 18 questions the
+  wiki covers, the walk found the file every time. It can never beat the wiki it walks.
+- **It ranks better.** MRR is 0.79–0.85 against 0.62 for the best hybrid, so the right file is
+  usually first.
+- **It costs a call per question instead of an index.** About $0.0008 and 2.5 s per question, and it
+  needs a written wiki first ($0.09 for zustand). The outline of 21 pages fits in one call; a wiki of
+  hundreds of pages would need another level of navigation, and more calls.
+- **The comparison is partly circular.** The wiki was written by an author that retrieved through
+  hybrid search, so the walk inherits what that search found.
+- **No reranker baseline today.** With `OPENROUTER_ZDR=true`, OpenRouter has no zero-retention
+  endpoint for `cohere/rerank-4-pro` or `rerank-4-fast`, so both now fail with a 404. The 0.95 above
+  was measured before ZDR routing became the default.
+- **The search numbers moved.** The unchanged eval gives 0.70 for hybrid 1:1 today against 0.80 on
+  2026-10-22. The code is the same (checked by running the old `eval/run.ts`), so the corpus or the
+  embedding provider changed; compare strategies within one day, not across days.
+
+Run `pnpm eval "wiki tree"`; set `EVAL_TREE_MODEL` to try another model. The repo must already have
+wiki pages.
 
 ## Eval 4: Chat
 
@@ -362,6 +407,7 @@ To reproduce, from the repo root with a funded `OPENROUTER_API_KEY` in `.env.loc
 pnpm db:setup && pnpm worker            # in one terminal
 pnpm repo:add pmndrs/zustand            # wait for the sync to finish
 pnpm eval                               # retrieval strategies (eval/golden.json)
+pnpm eval "wiki tree"                   # vectorless walk; needs the zustand wiki written first
 pnpm bench:chat anthropic/claude-haiku-5.5 z-ai/glm-5.3-flash   # chat agent per model
 pnpm bench:author z-ai/glm-5.3-flash pmndrs/zustand --wipe      # deletes that repo's wiki pages first
 ```
