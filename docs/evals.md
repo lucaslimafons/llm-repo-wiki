@@ -21,8 +21,10 @@ chat questions at $0.003 each. In a later wiki, 87% of cited sentences matched t
 
 The reranker is measured here but not yet used by the app; the app searches with plain hybrid RRF
 today. See [Retrieval and reranking](models.md#retrieval-and-reranking). Rerankers no longer run
-with zero data retention on, and a vectorless walk over the wiki's own outline reached recall@5 0.90
-(0.95 with the reranker) with better ranking, at $0.0008 a question ([Vectorless: walking the wiki tree](#vectorless-walking-the-wiki-tree)).
+with zero data retention on. A vectorless walk over a folder → file → symbol outline of the code matched
+the reranker's recall@5 (0.95–1.00) with better ranking, at $0.0018 a question and no reranker
+([Vectorless: walking the code tree](#vectorless-walking-the-code-tree)); a walk over the wiki's own
+outline reached 0.90 ([wiki tree](#vectorless-walking-the-wiki-tree)).
 
 The cheapest models failed in ways a price list doesn't show:
 
@@ -185,6 +187,36 @@ were measured the same day:
 
 Run `pnpm eval "wiki tree"`; set `EVAL_TREE_MODEL` to try another model. The repo must already have
 wiki pages.
+
+### Vectorless: walking the code tree
+
+The same walk works over the code itself, with no wiki. [`src/search/code-tree.ts`](../src/search/code-tree.ts)
+builds an outline from the chunks ingest already stores: folders, then numbered files, each with the
+function, type or doc-heading names tree-sitter found in it. zustand's 128 files fit in one outline.
+Claude Haiku 5.5 picks up to 4 files, then reads those files' chunks (first 800 characters each) and
+ranks them.
+
+It matched the reranker's recall with the best ranking of any strategy, and it runs with zero data
+retention on:
+
+| Strategy | Recall@5 | MRR@10 | Latency/query | Cost/query |
+| --- | --- | --- | --- | --- |
+| code tree, Haiku 5.5 (3 runs, 2026-11-11) | 0.95–1.00 | 0.900–0.925 | 2.0–2.4 s | $0.0018 |
+| hybrid + rerank-4-pro (2026-11-06, ZDR off) | 0.95 | 0.727 | 1,248 ms | $0.0025 |
+| wiki tree, Haiku 5.5 (2026-11-11) | 0.90 | 0.810 | 2,558 ms | $0.0008 |
+| hybrid RRF 3:1 (2026-11-11) | 0.80 | 0.615 | 607 ms | $0 |
+
+- **It needs no wiki and no index beyond the chunks.** Unlike the wiki walk, it finds the Immer and
+  `combine` answers, because every file is in the outline.
+- **Its one miss is the reranker's miss.** "How do I create a store without React?" expects
+  `src/vanilla.ts`; the walk found it in one run of three.
+- **zustand is the easy case.** 128 files with descriptive names (`persist.ts`, `shallow.ts`) and
+  well-headed docs fit in one call. A repo of thousands of files, or one with vague names, needs a
+  folder-level step first, and the outline grows with the repo while the reranker's cost does not.
+- **It costs twice the wiki walk** because the second call reads code, not summaries, and four files
+  of chunks are longer than three wiki pages.
+
+Run `pnpm eval "code tree"`.
 
 ## Eval 4: Chat
 
@@ -415,6 +447,7 @@ pnpm db:setup && pnpm worker            # in one terminal
 pnpm repo:add pmndrs/zustand            # wait for the sync to finish
 pnpm eval                               # retrieval strategies (eval/golden.json)
 pnpm eval "wiki tree"                   # vectorless walk; needs the zustand wiki written first
+pnpm eval "code tree"                   # vectorless walk over the code outline
 pnpm bench:chat anthropic/claude-haiku-5.5 z-ai/glm-5.3-flash   # chat agent per model
 pnpm bench:author z-ai/glm-5.3-flash pmndrs/zustand --wipe      # deletes that repo's wiki pages first
 ```
