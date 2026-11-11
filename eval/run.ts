@@ -1,6 +1,6 @@
 /**
  * Retrieval eval: recall@5, MRR@10, latency and cost per retrieval strategy (vector, full-text,
- * RRF hybrid, weighted RRF, each with a cross-encoder reranker, and the vectorless wiki-tree walk)
+ * RRF hybrid, weighted RRF, each with a cross-encoder reranker, and the vectorless wiki and code tree walks)
  * over a pinned commit of a public repo. Syncs that commit first (real embeddings, so it needs
  * OPENROUTER_API_KEY). Run: pnpm eval [name filter]
  */
@@ -23,6 +23,7 @@ import { rerankHits } from "@/search/rerank";
 import { providerPrivacy } from "@/lib/openrouter-privacy";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { loadTreePages, treeSearch } from "@/search/tree";
+import { codeTreeSearch, loadCodeChunks } from "@/search/code-tree";
 
 const goldenSchema = z.object({
   repo: z.string(),
@@ -32,7 +33,7 @@ const goldenSchema = z.object({
 
 const K_RECALL = 5;
 const K_MRR = 10;
-/** The tree walk's model; the wiki it walks is the one holding the golden repo. */
+/** The tree walks' model. The wiki tree walks the wiki holding the golden repo; the code tree walks its chunks. */
 const TREE_MODEL = process.env.EVAL_TREE_MODEL || "anthropic/claude-haiku-5.5";
 
 type SearchStrategy = { name: string; mode: SearchMode; weights?: FusionWeights; rerank?: string };
@@ -113,7 +114,16 @@ async function main() {
       return { paths: out.citations.map((c) => c.path), costUsd: out.costUsd };
     },
   };
-  const retrievers: Retriever[] = [...SEARCH_STRATEGIES.map(searchRetriever), treeRetriever];
+  let codeChunks: Awaited<ReturnType<typeof loadCodeChunks>> | undefined;
+  const codeTreeRetriever: Retriever = {
+    name: `code tree (${TREE_MODEL.split("/").pop()})`,
+    async run(q) {
+      codeChunks ??= await loadCodeChunks(database, repo.wikiId, ref);
+      const out = await codeTreeSearch(q, codeChunks, { model: treeModel, limit: K_MRR });
+      return { paths: out.chunks.map((c) => c.path), costUsd: out.costUsd };
+    },
+  };
+  const retrievers: Retriever[] = [...SEARCH_STRATEGIES.map(searchRetriever), treeRetriever, codeTreeRetriever];
 
   const only = process.argv[2];
   const rows: { name: string; recall: number; mrr: number; ms: number; cost: number; misses: string[] }[] = [];
